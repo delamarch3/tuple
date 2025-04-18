@@ -96,9 +96,8 @@ impl Schema {
 ///
 /// The size of the null bitmap is determined by the number of columns in the schema. Each section
 /// of the bitmap will be a u64. So if there are 65 columns, the size of the null bitmap will be
-/// 128 bits.
-/// For simplicity the null bitmap will exist even if there are no nullable columns in the
-/// schema. Edit: if the schema is empty, then the null section is also empty.
+/// 128 bits. For simplicity the null section will exist even if there are no nullable columns in the
+/// schema, unless the schema is empty, in that case the null section is also empty.
 /// Also for simplicity, the size of the null value will still be appended to the data
 /// section, which will ease reading the tuple, since the offsets of all values update once a null
 /// is introduced.
@@ -174,6 +173,14 @@ fn fit_tuple_with_schema(tuple: &Tuple, schema: &Schema) -> Tuple {
     // columns.
     let builder = TupleBuilder::new(todo!());
     todo!()
+}
+
+// TODO: For debug formatting only
+pub struct TupleWithSchema<'t, 's>(&'t Tuple, &'s Schema);
+impl<'t, 's> std::fmt::Debug for TupleWithSchema<'t, 's> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
+    }
 }
 
 struct Variable {
@@ -252,6 +259,7 @@ impl TupleBuilder {
         self
     }
 
+    // TODO: this should also append to the data section as per the Tuple doc
     pub fn null(mut self) -> Self {
         self.position += 1;
 
