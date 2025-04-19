@@ -1,89 +1,16 @@
+pub mod schema;
+
 use bytes::{BufMut, BytesMut};
 
-pub enum Type {
-    String,
-    Int8,
-    Int32,
-    Float32,
-}
+use crate::schema::{Schema, Type};
 
-impl Type {
-    pub fn size(&self) -> usize {
-        match self {
-            Type::String => 4,
-            Type::Int8 => 1,
-            Type::Int32 => 4,
-            Type::Float32 => 4,
-        }
-    }
-}
-
+#[derive(Debug, PartialEq)]
 pub enum Value {
     String(Vec<u8>),
     Int8(i8),
     Int32(i32),
     Float32(f32),
     Null,
-}
-
-pub struct Column {}
-
-#[derive(Default)]
-pub struct Schema {
-    tables: Vec<Option<String>>,
-    names: Vec<String>,
-    types: Vec<Type>,
-    offsets: Vec<usize>,
-    nullable: Vec<u64>,
-    len: usize,
-    size: usize,
-}
-
-impl Schema {
-    pub fn nullable(&self) -> &Vec<u64> {
-        &self.nullable
-    }
-
-    pub fn len(&self) -> usize {
-        self.len
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-
-    pub fn size(&self) -> usize {
-        self.size
-    }
-
-    pub fn add_column(
-        mut self,
-        table: Option<String>,
-        name: String,
-        r#type: Type,
-        nullable: bool,
-    ) -> Self {
-        self.offsets.push(self.size);
-        self.size += r#type.size();
-        self.len += 1;
-
-        self.tables.push(table);
-        self.names.push(name);
-        self.types.push(r#type);
-
-        let pos = self.tables.len();
-        let i = pos / 64;
-        let is_nullable = nullable as u64;
-
-        if let Some(bitmap) = self.nullable.get_mut(i) {
-            let bit = pos % 64;
-            *bitmap |= is_nullable << bit;
-        } else {
-            self.nullable.push(0 | is_nullable);
-        };
-
-        self
-    }
 }
 
 /// The layout of the tuple is:
@@ -101,6 +28,12 @@ impl Schema {
 /// Also for simplicity, the size of the null value will still be appended to the data
 /// section, which will ease reading the tuple, since the offsets of all values update once a null
 /// is introduced.
+/// TODO: consider encoding the typeids in the tuple - do not need to hold offsets in the schema
+/// and can store null easily. Then get value would look like: check types len, iterate until pos
+/// while keeping track of the offset. if typeid = 0 return null, else read offset and use type
+/// size. We can build the typeid list once in the schema and assert after build that they match.
+/// For [`fit_tuple_with_schema()`], we could use the indices of the columns instead of offsets from
+/// schema.
 pub struct Tuple {
     nulls: Vec<u64>,
     data: BytesMut,
@@ -112,7 +45,7 @@ impl Tuple {
     fn get(&self, schema: &Schema, pos: usize) -> Value {
         use Value::*;
 
-        let (r#type, offset) = (&schema.types[pos], schema.offsets[pos]);
+        let (r#type, offset) = schema.get_physical_attrs(pos);
 
         let i = pos / 64;
         let bit = pos % 64;
@@ -160,7 +93,7 @@ impl Tuple {
 
         let mut builder = TupleBuilder::new(schema);
         builder = builder.add(first);
-        builder = (0..schema.len()).fold(builder, |builder, i| builder.add(self.get(schema, i)));
+        builder = (0..schema.len()).fold(builder, |b, i| b.add(self.get(schema, i)));
         builder.finish()
     }
 }
@@ -168,19 +101,17 @@ impl Tuple {
 /// Creates a new tuple using only the columns in the schema. The schema offsets are expected to
 /// align with the offsets in the tuple. This is useful for creating composite key tuple out of
 /// non-contiguous columns.
-fn fit_tuple_with_schema(tuple: &Tuple, schema: &Schema) -> Tuple {
-    // TODO: We need to reduce the schema for the builder. We also need to preserve nullability of
-    // columns.
-    let builder = TupleBuilder::new(todo!());
-    todo!()
-}
-
-// TODO: For debug formatting only
-pub struct TupleWithSchema<'t, 's>(&'t Tuple, &'s Schema);
-impl<'t, 's> std::fmt::Debug for TupleWithSchema<'t, 's> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+pub fn fit_tuple_with_schema(tuple: &Tuple, schema: &Schema) -> Tuple {
+    // TODO: Probably do not need to pass the entire schema to the tuple builder
+    let mut compact_schema = schema.clone();
+    compact_schema.compact();
+    let mut builder = TupleBuilder::new(&compact_schema);
+    for position in schema.positions() {
+        let value = tuple.get(schema, position);
+        builder = builder.add(value);
     }
+
+    builder.finish()
 }
 
 struct Variable {
@@ -189,16 +120,17 @@ struct Variable {
     pointer_offset: usize,
 }
 
-pub struct TupleBuilder {
+pub struct TupleBuilder<'a> {
+    schema: &'a Schema,
     data: BytesMut,
     vars: Vec<Variable>,
     nulls: Vec<u64>,
     position: usize,
 }
 
-impl TupleBuilder {
-    pub fn new(schema: &Schema) -> Self {
-        let nulls_len = schema.nullable().len();
+impl<'a> TupleBuilder<'a> {
+    pub fn new(schema: &'a Schema) -> Self {
+        let nulls_len = (schema.columns().len() / 64) + 1;
         let data_size = schema.size();
 
         let mut nulls = Vec::new();
@@ -209,6 +141,7 @@ impl TupleBuilder {
         let position = 0;
 
         Self {
+            schema,
             data,
             vars,
             nulls,
@@ -259,7 +192,6 @@ impl TupleBuilder {
         self
     }
 
-    // TODO: this should also append to the data section as per the Tuple doc
     pub fn null(mut self) -> Self {
         self.position += 1;
 
@@ -268,7 +200,12 @@ impl TupleBuilder {
         let bit = pos % 64;
         self.nulls[i] |= 1 << bit;
 
-        self
+        match self.schema.get_type(pos).unwrap() {
+            Type::String => self.string(&[]),
+            Type::Int8 => self.int8(0),
+            Type::Int32 => self.int32(0),
+            Type::Float32 => self.float32(0.),
+        }
     }
 
     pub fn finish(mut self) -> Tuple {
@@ -287,5 +224,38 @@ impl TupleBuilder {
             nulls: self.nulls,
             data: self.data,
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::{TupleBuilder, Value::*};
+    use crate::schema::{Schema, Type};
+
+    #[test]
+    fn test_build_and_get() {
+        let nullable = true;
+        let schema = Schema::default()
+            .add_column("c1".into(), Type::Int8, nullable)
+            .add_column("c2".into(), Type::String, nullable)
+            .add_column("c3".into(), Type::Float32, nullable)
+            .add_column("c4".into(), Type::Int32, nullable);
+
+        let tuple = TupleBuilder::new(&schema)
+            .int8(32)
+            .string(b"the quick brown fox jumps over the lazy dog")
+            .null()
+            .int32(7)
+            .finish();
+
+        [
+            Int8(32),
+            String(b"the quick brown fox jumps over the lazy dog".to_vec()),
+            Null,
+            Int32(7),
+        ]
+        .into_iter()
+        .enumerate()
+        .for_each(|(i, want)| assert_eq!(tuple.get(&schema, i), want));
     }
 }
