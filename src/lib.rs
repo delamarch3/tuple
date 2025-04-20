@@ -78,6 +78,18 @@ pub struct Tuple {
 }
 
 impl Tuple {
+    pub fn null_bytes(&self) -> &[u8] {
+        self.nulls.as_slice()
+    }
+
+    pub fn data_bytes(&self) -> &[u8] {
+        &self.data[..]
+    }
+
+    pub fn size(&self) -> usize {
+        self.null_bytes().len() + self.data_bytes().len()
+    }
+
     /// Gets the value of the ith column of the schema. Note that the nullability of the column in
     /// the schema is ignored, null is returned based on the tuples null bitmap only.
     pub fn get(&self, schema: &Schema, pos: usize) -> Value {
@@ -176,18 +188,6 @@ impl Tuple {
         }
 
         Equal
-    }
-
-    pub fn null_bytes(&self) -> &[u8] {
-        self.nulls.as_slice()
-    }
-
-    pub fn data_bytes(&self) -> &[u8] {
-        &self.data[..]
-    }
-
-    pub fn size(&self) -> usize {
-        self.null_bytes().len() + self.data_bytes().len()
     }
 
     pub fn from_bytes(schema: &Schema, bytes: &[u8]) -> Tuple {
