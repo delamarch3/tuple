@@ -59,8 +59,8 @@ impl Ord for Value {
 /// known once the variable length section is appended.
 ///
 /// The size of the null bitmap is determined by the number of columns in the schema. Each section
-/// of the bitmap will be a u64. So if there are 65 columns, the size of the null bitmap will be
-/// 128 bits. For simplicity the null section will exist even if there are no nullable columns in the
+/// of the bitmap will be a u8. So if there are 65 columns, the size of the null bitmap will be
+/// 72 bits (9 bytes). For simplicity the null section will exist even if there are no nullable columns in the
 /// schema, unless the schema is empty, in that case the null section is also empty.
 /// Also for simplicity, the size of the null value will still be appended to the data
 /// section, which will ease reading the tuple, since the offsets of all values update once a null
@@ -73,7 +73,7 @@ impl Ord for Value {
 /// schema.
 #[derive(Debug, PartialEq)]
 pub struct Tuple {
-    nulls: Vec<u64>,
+    nulls: Vec<u8>,
     data: BytesMut,
 }
 
@@ -111,8 +111,8 @@ impl Tuple {
     pub fn get_bytes<'a>(&'a self, schema: &Schema, pos: usize) -> Option<&'a [u8]> {
         let (r#type, offset) = schema.get_physical_attrs(pos);
 
-        let i = pos / 64;
-        let bit = pos % 64;
+        let i = pos / 8;
+        let bit = pos % 8;
         if self.nulls[i] & (1 << bit) > 0 {
             return None;
         }
@@ -177,6 +177,32 @@ impl Tuple {
 
         Equal
     }
+
+    pub fn null_bytes(&self) -> &[u8] {
+        self.nulls.as_slice()
+    }
+
+    pub fn data_bytes(&self) -> &[u8] {
+        &self.data[..]
+    }
+
+    pub fn size(&self) -> usize {
+        self.null_bytes().len() + self.data_bytes().len()
+    }
+
+    pub fn from_bytes(schema: &Schema, bytes: &[u8]) -> Tuple {
+        let nulls_size = (schema.columns().len() / 8) + 1;
+        let data_size = schema.size();
+
+        let nulls = bytes[0..nulls_size].to_vec();
+        let data = &bytes[nulls_size..nulls_size + data_size];
+        let strings_size = schema.string_pointer_offsets().fold(0, |acc, offset| {
+            acc + u16::from_be_bytes(data[offset + 2..offset + 4].try_into().unwrap())
+        }) as usize;
+        let data = BytesMut::from(&bytes[nulls_size..nulls_size + data_size + strings_size]);
+
+        Self { nulls, data }
+    }
 }
 
 /// Creates a new tuple using only the columns in the schema. The schema offsets are expected to
@@ -205,13 +231,13 @@ pub struct TupleBuilder<'a> {
     schema: &'a Schema,
     data: BytesMut,
     vars: Vec<Variable>,
-    nulls: Vec<u64>,
+    nulls: Vec<u8>,
     position: usize,
 }
 
 impl<'a> TupleBuilder<'a> {
     pub fn new(schema: &'a Schema) -> Self {
-        let nulls_len = (schema.columns().len() / 64) + 1;
+        let nulls_len = (schema.columns().len() / 8) + 1;
         let data_size = schema.size();
 
         let mut nulls = Vec::new();
@@ -275,8 +301,8 @@ impl<'a> TupleBuilder<'a> {
 
     pub fn null(mut self) -> Self {
         let pos = self.position;
-        let i = pos / 64;
-        let bit = pos % 64;
+        let i = pos / 8;
+        let bit = pos % 8;
         self.nulls[i] |= 1 << bit;
 
         match self.schema.get_type(pos) {
@@ -308,8 +334,12 @@ impl<'a> TupleBuilder<'a> {
 
 #[cfg(test)]
 mod test {
+    use std::cmp::Ordering::*;
+    use std::io::{Cursor, Read, Write};
+
     use super::{TupleBuilder, Value::*};
     use crate::schema::{Schema, Type};
+    use crate::Tuple;
 
     #[test]
     fn test_build_and_get() {
@@ -339,7 +369,7 @@ mod test {
     }
 
     #[test]
-    fn test_roundtrip() {
+    fn test_builder_roundtrip() {
         let nullable = true;
         let schema = Schema::default()
             .add_column("c1".into(), Type::Int8, nullable)
@@ -404,8 +434,6 @@ mod test {
 
     #[test]
     fn test_cmp() {
-        use std::cmp::Ordering::*;
-
         let nullable = true;
 
         let schema = Schema::default()
@@ -441,5 +469,53 @@ mod test {
                 let have = tuples[lhs].cmp(&tuples[rhs], &schema);
                 assert_eq!(want, have);
             });
+    }
+
+    #[test]
+    fn test_write_read_roundtrip() -> std::io::Result<()> {
+        let nullable = true;
+
+        let schema = Schema::default()
+            .add_column("c1".into(), Type::Int8, nullable)
+            .add_column("c2".into(), Type::String, nullable)
+            .add_column("c3".into(), Type::Float32, nullable)
+            .add_column("c4".into(), Type::Int32, nullable);
+
+        let tuples = [
+            TupleBuilder::new(&schema)
+                .int8(32)
+                .string(b"the quick brown fox jumps over the lazy dog")
+                .null()
+                .int32(7)
+                .finish(),
+            TupleBuilder::new(&schema)
+                .int8(32)
+                .string(b"abd")
+                .float32(16.)
+                .int32(7)
+                .finish(),
+            TupleBuilder::new(&schema)
+                .int8(32)
+                .null()
+                .float32(7.2)
+                .null()
+                .finish(),
+        ];
+
+        let mut c = Cursor::new(Vec::new());
+        tuples.iter().for_each(|tuple| {
+            c.write(tuple.null_bytes()).unwrap();
+            c.write(tuple.data_bytes()).unwrap();
+        });
+
+        c.set_position(0);
+        tuples.iter().for_each(|want| {
+            let mut buf = vec![0; want.size()];
+            c.read_exact(&mut buf).unwrap();
+            let have = Tuple::from_bytes(&schema, &buf);
+            assert_eq!(want.cmp(&have, &schema), Equal);
+        });
+
+        Ok(())
     }
 }

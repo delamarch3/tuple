@@ -1,4 +1,4 @@
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum Type {
     String,
     Int8,
@@ -65,6 +65,13 @@ impl Schema {
 
     pub fn get_physical_attrs(&self, pos: usize) -> (Type, usize) {
         (self.columns[pos].r#type, self.columns[pos].offset)
+    }
+
+    pub fn string_pointer_offsets(&self) -> impl Iterator<Item = usize> + use<'_> {
+        self.columns
+            .iter()
+            .filter(|Column { r#type, .. }| r#type == &Type::String)
+            .map(|Column { offset, .. }| *offset)
     }
 
     pub fn add_column(self, name: String, r#type: Type, nullable: bool) -> Self {
