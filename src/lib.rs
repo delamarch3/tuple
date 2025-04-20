@@ -34,6 +34,7 @@ pub enum Value {
 /// size. We can build the typeid list once in the schema and assert after build that they match.
 /// For [`fit_tuple_with_schema()`], we could use the indices of the columns instead of offsets from
 /// schema.
+#[derive(Debug, PartialEq)]
 pub struct Tuple {
     nulls: Vec<u64>,
     data: BytesMut,
@@ -84,7 +85,18 @@ impl Tuple {
 
         // TODO: handle overflow
         let first = match self.get(schema, 0) {
-            String(_) => todo!(),
+            String(value) if value.len() == 0 => String(vec![0]),
+            String(mut value) => 'string: {
+                for b in value.iter_mut() {
+                    if *b < 255 {
+                        *b += 1;
+                        break 'string String(value);
+                    }
+                }
+
+                value.push(0);
+                String(value)
+            }
             Int8(value) => Int8(value + 1),
             Int32(value) => Int32(value + 1),
             Float32(value) => Float32(value + f32::EPSILON),
@@ -93,7 +105,7 @@ impl Tuple {
 
         let mut builder = TupleBuilder::new(schema);
         builder = builder.add(first);
-        builder = (0..schema.len()).fold(builder, |b, i| b.add(self.get(schema, i)));
+        builder = (1..schema.len()).fold(builder, |b, i| b.add(self.get(schema, i)));
         builder.finish()
     }
 }
@@ -193,15 +205,13 @@ impl<'a> TupleBuilder<'a> {
     }
 
     pub fn null(mut self) -> Self {
-        self.position += 1;
-
-        let pos = self.position - 1;
+        let pos = self.position;
         let i = pos / 64;
         let bit = pos % 64;
         self.nulls[i] |= 1 << bit;
 
         match self.schema.get_type(pos).unwrap() {
-            Type::String => self.string(&[]),
+            Type::String => self.string(b""),
             Type::Int8 => self.int8(0),
             Type::Int32 => self.int32(0),
             Type::Float32 => self.float32(0.),
@@ -257,5 +267,69 @@ mod test {
         .into_iter()
         .enumerate()
         .for_each(|(i, want)| assert_eq!(tuple.get(&schema, i), want));
+    }
+
+    #[test]
+    fn test_roundtrip() {
+        let nullable = true;
+        let schema = Schema::default()
+            .add_column("c1".into(), Type::Int8, nullable)
+            .add_column("c2".into(), Type::String, nullable)
+            .add_column("c3".into(), Type::Float32, nullable)
+            .add_column("c4".into(), Type::Int32, nullable);
+
+        [
+            TupleBuilder::new(&schema)
+                .int8(32)
+                .string(b"the quick brown fox jumps over the lazy dog")
+                .null()
+                .int32(7)
+                .finish(),
+            TupleBuilder::new(&schema)
+                .null()
+                .null()
+                .null()
+                .null()
+                .finish(),
+        ]
+        .into_iter()
+        .for_each(|want| {
+            let mut builder = TupleBuilder::new(&schema);
+            builder = (0..schema.len()).fold(builder, |b, i| b.add(want.get(&schema, i)));
+            let have = builder.finish();
+
+            assert_eq!(want, have);
+        });
+    }
+
+    #[test]
+    fn test_next() {
+        let nullable = true;
+
+        let schema = Schema::default().add_column("c1".into(), Type::Int8, nullable);
+        let tuple = TupleBuilder::new(&schema).int8(0).finish();
+        let have = tuple.next(&schema);
+        let want = TupleBuilder::new(&schema).int8(1).finish();
+        assert_eq!(want, have);
+
+        let schema = Schema::default().add_column("c1".into(), Type::Float32, nullable);
+        let tuple = TupleBuilder::new(&schema).float32(0.).finish();
+        let have = tuple.next(&schema);
+        let want = TupleBuilder::new(&schema)
+            .float32(0. + f32::EPSILON)
+            .finish();
+        assert_eq!(want, have);
+
+        let schema = Schema::default().add_column("c1".into(), Type::String, nullable);
+        let tuple = TupleBuilder::new(&schema).string(&[0]).finish();
+        let have = tuple.next(&schema);
+        let want = TupleBuilder::new(&schema).string(&[1]).finish();
+        assert_eq!(want, have);
+
+        let schema = Schema::default().add_column("c1".into(), Type::String, nullable);
+        let tuple = TupleBuilder::new(&schema).string(&[255]).finish();
+        let have = tuple.next(&schema);
+        let want = TupleBuilder::new(&schema).string(&[255, 0]).finish();
+        assert_eq!(want, have);
     }
 }
