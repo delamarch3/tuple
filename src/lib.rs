@@ -1,16 +1,53 @@
 pub mod schema;
 
+use std::cmp::Ordering;
+
 use bytes::{BufMut, BytesMut};
 
 use crate::schema::{Schema, Type};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, PartialOrd)]
 pub enum Value {
     String(Vec<u8>),
     Int8(i8),
     Int32(i32),
     Float32(f32),
     Null,
+}
+
+impl Eq for Value {}
+
+impl Ord for Value {
+    fn cmp(&self, other: &Self) -> Ordering {
+        use Ordering::*;
+
+        match self {
+            Value::String(lhs) => match other {
+                Value::String(rhs) => lhs.cmp(rhs),
+                Value::Null => Greater,
+                _ => panic!("unsupported comparison"),
+            },
+            Value::Int8(lhs) => match other {
+                Value::Int8(rhs) => lhs.cmp(rhs),
+                Value::Null => Greater,
+                _ => panic!("unsupported comparison"),
+            },
+            Value::Int32(lhs) => match other {
+                Value::Int32(rhs) => lhs.cmp(rhs),
+                Value::Null => Greater,
+                _ => panic!("unsupported comparison"),
+            },
+            Value::Float32(lhs) => match other {
+                Value::Float32(rhs) => lhs.total_cmp(rhs),
+                Value::Null => Greater,
+                _ => panic!("unsupported comparison"),
+            },
+            Value::Null => match other {
+                Value::Null => Equal,
+                _ => Less,
+            },
+        }
+    }
 }
 
 /// The layout of the tuple is:
@@ -107,6 +144,22 @@ impl Tuple {
         builder = builder.add(first);
         builder = (1..schema.len()).fold(builder, |b, i| b.add(self.get(schema, i)));
         builder.finish()
+    }
+
+    pub fn cmp(&self, other: &Tuple, schema: &Schema) -> Ordering {
+        use Ordering::*;
+
+        for pos in schema.positions() {
+            let lhs = self.get(schema, pos);
+            let rhs = other.get(schema, pos);
+
+            match lhs.cmp(&rhs) {
+                ord @ Less | ord @ Greater => return ord,
+                Equal => continue,
+            }
+        }
+
+        Equal
     }
 }
 
@@ -331,5 +384,46 @@ mod test {
         let have = tuple.next(&schema);
         let want = TupleBuilder::new(&schema).string(&[255, 0]).finish();
         assert_eq!(want, have);
+    }
+
+    #[test]
+    fn test_cmp() {
+        use std::cmp::Ordering::*;
+
+        let nullable = true;
+
+        let schema = Schema::default()
+            .add_column("c1".into(), Type::Int8, nullable)
+            .add_column("c2".into(), Type::String, nullable)
+            .add_column("c3".into(), Type::Float32, nullable)
+            .add_column("c4".into(), Type::Int32, nullable);
+
+        let tuples = [
+            TupleBuilder::new(&schema)
+                .int8(32)
+                .string(b"abc")
+                .null()
+                .int32(7)
+                .finish(),
+            TupleBuilder::new(&schema)
+                .int8(32)
+                .string(b"abd")
+                .null()
+                .int32(7)
+                .finish(),
+            TupleBuilder::new(&schema)
+                .int8(32)
+                .string(b"abc")
+                .null()
+                .null()
+                .finish(),
+        ];
+
+        [(0, 0, Equal), (0, 1, Less), (0, 2, Greater)]
+            .into_iter()
+            .for_each(|(lhs, rhs, want)| {
+                let have = tuples[lhs].cmp(&tuples[rhs], &schema);
+                assert_eq!(want, have);
+            });
     }
 }
