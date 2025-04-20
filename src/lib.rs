@@ -80,15 +80,41 @@ pub struct Tuple {
 impl Tuple {
     /// Gets the value of the ith column of the schema. Note that the nullability of the column in
     /// the schema is ignored, null is returned based on the tuples null bitmap only.
-    fn get(&self, schema: &Schema, pos: usize) -> Value {
+    pub fn get(&self, schema: &Schema, pos: usize) -> Value {
         use Value::*;
 
+        let r#type = schema.get_type(pos);
+
+        let Some(bytes) = self.get_bytes(&schema, pos) else {
+            return Null;
+        };
+
+        match r#type {
+            Type::String => String(bytes.to_vec()),
+            Type::Int8 => {
+                let value = i8::from_be_bytes(bytes.try_into().unwrap());
+                Int8(value)
+            }
+            Type::Int32 => {
+                let value = i32::from_be_bytes(bytes.try_into().unwrap());
+                Int32(value)
+            }
+            Type::Float32 => {
+                let value = f32::from_be_bytes(bytes.try_into().unwrap());
+                Float32(value)
+            }
+        }
+    }
+
+    /// Gets the bytes of the ith column of the schema. Note that the nullability of the column in
+    /// the schema is ignored, null is returned based on the tuples null bitmap only.
+    pub fn get_bytes<'a>(&'a self, schema: &Schema, pos: usize) -> Option<&'a [u8]> {
         let (r#type, offset) = schema.get_physical_attrs(pos);
 
         let i = pos / 64;
         let bit = pos % 64;
         if self.nulls[i] & (1 << bit) > 0 {
-            return Null;
+            return None;
         }
 
         match r#type {
@@ -98,21 +124,9 @@ impl Tuple {
                         as usize;
                 let offset =
                     u16::from_be_bytes(self.data[offset..offset + 2].try_into().unwrap()) as usize;
-                let value = &self.data[offset..offset + length];
-                String(value.to_vec())
+                Some(&self.data[offset..offset + length])
             }
-            Type::Int8 => {
-                let value = i8::from_be_bytes(self.data[offset..offset + 1].try_into().unwrap());
-                Int8(value)
-            }
-            Type::Int32 => {
-                let value = i32::from_be_bytes(self.data[offset..offset + 4].try_into().unwrap());
-                Int32(value)
-            }
-            Type::Float32 => {
-                let value = f32::from_be_bytes(self.data[offset..offset + 4].try_into().unwrap());
-                Float32(value)
-            }
+            _ => Some(&self.data[offset..offset + r#type.size()]),
         }
     }
 
@@ -140,12 +154,14 @@ impl Tuple {
             Null => todo!(), // This would need to turn into a non-null value by consulting the schema
         };
 
-        let mut builder = TupleBuilder::new(schema);
-        builder = builder.add(first);
-        builder = (1..schema.len()).fold(builder, |b, i| b.add(self.get(schema, i)));
-        builder.finish()
+        (1..schema.len())
+            .fold(TupleBuilder::new(schema).add(first), |b, i| {
+                b.add(self.get(schema, i))
+            })
+            .finish()
     }
 
+    /// Compares `self` and `other` by iterating and comparing each column of the tuple.
     pub fn cmp(&self, other: &Tuple, schema: &Schema) -> Ordering {
         use Ordering::*;
 
@@ -263,7 +279,7 @@ impl<'a> TupleBuilder<'a> {
         let bit = pos % 64;
         self.nulls[i] |= 1 << bit;
 
-        match self.schema.get_type(pos).unwrap() {
+        match self.schema.get_type(pos) {
             Type::String => self.string(b""),
             Type::Int8 => self.int8(0),
             Type::Int32 => self.int32(0),

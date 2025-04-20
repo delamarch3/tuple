@@ -59,8 +59,8 @@ impl Schema {
         self.size
     }
 
-    pub fn get_type(&self, i: usize) -> Option<Type> {
-        self.columns.get(i).map(|Column { r#type, .. }| *r#type)
+    pub fn get_type(&self, i: usize) -> Type {
+        self.columns[i].r#type
     }
 
     pub fn get_physical_attrs(&self, pos: usize) -> (Type, usize) {
