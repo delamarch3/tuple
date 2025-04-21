@@ -1,4 +1,4 @@
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Type {
     String,
     Int8,
@@ -17,22 +17,23 @@ impl Type {
     }
 }
 
-#[derive(Clone)]
-pub struct QualifiedColumn {
+#[derive(Clone, PartialEq, Debug)]
+pub struct Column {
     table: Option<String>,
     name: String,
-}
-
-#[derive(Clone)]
-pub struct Column {
-    identifier: QualifiedColumn,
     r#type: Type,
     offset: usize,
     position: usize,
     nullable: bool,
 }
 
-#[derive(Default, Clone)]
+impl Column {
+    pub fn nullable(&self) -> bool {
+        self.nullable
+    }
+}
+
+#[derive(Default, Clone, PartialEq, Debug)]
 pub struct Schema {
     columns: Vec<Column>,
     size: usize,
@@ -85,11 +86,11 @@ impl Schema {
         r#type: Type,
         nullable: bool,
     ) -> Self {
-        let identifier = QualifiedColumn { table, name };
         let offset = self.size;
         self.size += r#type.size();
         self.columns.push(Column {
-            identifier,
+            table,
+            name,
             r#type,
             offset,
             position: self.columns.len(),
@@ -103,31 +104,17 @@ impl Schema {
     /// [`None`] is returned. The column offsets and the size of the schema will remain the same, ie
     /// they may be non-contiguous after projecting. Call [`Schema::compact()`] to make the columns
     /// contiguous.
-    // TODO: might need variants that accept Vec<usize> and &[&str]
-    pub fn project(&self, identifiers: &[QualifiedColumn]) -> Option<Schema> {
-        let mut columns = Vec::with_capacity(identifiers.len());
+    pub fn project<'a>(
+        &self,
+        identifiers: impl Iterator<Item = (Option<&'a str>, &'a str)>,
+    ) -> Option<Schema> {
+        let mut columns = Vec::new();
         let size = self.size;
 
-        for QualifiedColumn {
-            table: t0,
-            name: n0,
-        } in identifiers
-        {
-            let column = self
-                .columns
-                .iter()
-                .find(
-                    |Column {
-                         identifier:
-                             QualifiedColumn {
-                                 table: t1,
-                                 name: n1,
-                             },
-                         ..
-                     }| t0 == t1 && n0 == n1,
-                )?
-                .clone();
-
+        for (table, name) in identifiers {
+            // This currently returns None if the table/column doesn't exist, but it might make
+            // sense to continue instead.
+            let column = self.find_qualified_column(table, name).cloned()?;
             columns.push(column);
         }
 
@@ -149,5 +136,111 @@ impl Schema {
                 (i + 1, size + r#type.size())
             },
         );
+    }
+
+    pub fn join(&mut self, other: &Schema) {
+        self.columns.extend(other.columns.iter().cloned());
+        self.compact();
+    }
+
+    pub fn qualify(&mut self, table: &str) {
+        self.columns
+            .iter_mut()
+            .for_each(|column| column.table = Some(table.to_owned()));
+    }
+
+    pub fn find_column(&self, name: &str) -> Option<&Column> {
+        self.find_qualified_column(None, name)
+    }
+
+    pub fn find_qualified_column(&self, table: Option<&str>, name: &str) -> Option<&Column> {
+        self.columns.iter().find(
+            |Column {
+                 table: t1,
+                 name: n1,
+                 ..
+             }| table == t1.as_deref() && name == n1,
+        )
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::{Schema, Type};
+
+    #[test]
+    fn test_project_and_compact() {
+        let nullable = true;
+
+        let schema = Schema::default()
+            .add_column("c1".into(), Type::Int8, nullable)
+            .add_qualified_column(Some("t1".into()), "c2".into(), Type::String, nullable)
+            .add_column("c3".into(), Type::Float32, nullable)
+            .add_qualified_column(Some("t1".into()), "c4".into(), Type::Int32, nullable);
+
+        let mut want = schema.clone();
+        want.columns.remove(1);
+        want.columns.remove(2);
+        let mut have = schema
+            .project([(None, "c1"), (None, "c3")].into_iter())
+            .unwrap();
+        assert_eq!(want, have);
+        let want = Schema::default()
+            .add_column("c1".into(), Type::Int8, nullable)
+            .add_column("c3".into(), Type::Float32, nullable);
+        have.compact();
+        assert_eq!(want, have);
+
+        let mut want = schema.clone();
+        want.columns.remove(0);
+        want.columns.remove(1);
+        let mut have = schema
+            .project([(Some("t1"), "c2"), (Some("t1"), "c4")].into_iter())
+            .unwrap();
+        assert_eq!(want, have);
+        let want = Schema::default()
+            .add_qualified_column(Some("t1".into()), "c2".into(), Type::String, nullable)
+            .add_qualified_column(Some("t1".into()), "c4".into(), Type::Int32, nullable);
+        have.compact();
+        assert_eq!(want, have);
+    }
+
+    #[test]
+    fn test_join() {
+        let nullable = true;
+
+        let lhs = Schema::default()
+            .add_column("c1".into(), Type::Int8, nullable)
+            .add_qualified_column(Some("t1".into()), "c2".into(), Type::String, nullable)
+            .add_column("c3".into(), Type::Float32, nullable)
+            .add_qualified_column(Some("t1".into()), "c4".into(), Type::Int32, nullable);
+
+        let rhs = Schema::default();
+        let mut have = lhs.clone();
+        have.join(&rhs);
+        let want = Schema::default()
+            .add_column("c1".into(), Type::Int8, nullable)
+            .add_qualified_column(Some("t1".into()), "c2".into(), Type::String, nullable)
+            .add_column("c3".into(), Type::Float32, nullable)
+            .add_qualified_column(Some("t1".into()), "c4".into(), Type::Int32, nullable);
+        assert_eq!(want, have);
+
+        let rhs = Schema::default()
+            .add_column("c1".into(), Type::Int8, nullable)
+            .add_qualified_column(Some("t1".into()), "c2".into(), Type::String, nullable)
+            .add_column("c3".into(), Type::Float32, nullable)
+            .add_qualified_column(Some("t1".into()), "c4".into(), Type::Int32, nullable);
+        let mut have = lhs.clone();
+        have.join(&rhs);
+        let want = Schema::default()
+            .add_column("c1".into(), Type::Int8, nullable)
+            .add_qualified_column(Some("t1".into()), "c2".into(), Type::String, nullable)
+            .add_column("c3".into(), Type::Float32, nullable)
+            .add_qualified_column(Some("t1".into()), "c4".into(), Type::Int32, nullable)
+            .add_column("c1".into(), Type::Int8, nullable)
+            .add_qualified_column(Some("t1".into()), "c2".into(), Type::String, nullable)
+            .add_column("c3".into(), Type::Float32, nullable)
+            .add_qualified_column(Some("t1".into()), "c4".into(), Type::Int32, nullable);
+        assert_eq!(want, have);
     }
 }

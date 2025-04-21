@@ -197,7 +197,8 @@ impl Tuple {
         let nulls = bytes[0..nulls_size].to_vec();
         let data = &bytes[nulls_size..nulls_size + data_size];
         let strings_size = schema.string_pointer_offsets().fold(0, |acc, offset| {
-            acc + u16::from_be_bytes(data[offset + 2..offset + 4].try_into().unwrap())
+            let length = u16::from_be_bytes(data[offset + 2..offset + 4].try_into().unwrap());
+            acc + length
         }) as usize;
         let data = BytesMut::from(&bytes[nulls_size..nulls_size + data_size + strings_size]);
 
