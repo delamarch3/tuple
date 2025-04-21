@@ -28,6 +28,10 @@ pub struct Column {
 }
 
 impl Column {
+    pub fn position(&self) -> usize {
+        self.position
+    }
+
     pub fn nullable(&self) -> bool {
         self.nullable
     }
