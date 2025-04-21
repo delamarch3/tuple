@@ -52,7 +52,7 @@ impl Tuple {
 
         let r#type = schema.get_type(pos);
 
-        let Some(bytes) = self.get_bytes(&schema, pos) else {
+        let Some(bytes) = self.get_bytes(schema, pos) else {
             return Null;
         };
 
@@ -103,7 +103,7 @@ impl Tuple {
 
         // TODO: handle overflow
         let first = match self.get(schema, 0) {
-            String(value) if value.len() == 0 => String(vec![0]),
+            String(value) if value.is_empty() => String(vec![0]),
             String(mut value) => 'string: {
                 for b in value.iter_mut() {
                     if *b < 255 {

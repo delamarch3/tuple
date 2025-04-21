@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-#[derive(Debug, PartialEq, PartialOrd, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Value {
     String(Vec<u8>),
     Int8(i8),
@@ -10,6 +10,12 @@ pub enum Value {
 }
 
 impl Eq for Value {}
+
+impl PartialOrd for Value {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
 impl Ord for Value {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -154,33 +160,33 @@ impl std::ops::Div for Value {
     }
 }
 
-impl Into<Value> for i8 {
-    fn into(self) -> Value {
-        Value::Int8(self)
+impl From<i8> for Value {
+    fn from(val: i8) -> Self {
+        Value::Int8(val)
     }
 }
 
-impl Into<Value> for i32 {
-    fn into(self) -> Value {
-        Value::Int32(self)
+impl From<i32> for Value {
+    fn from(val: i32) -> Self {
+        Value::Int32(val)
     }
 }
 
-impl Into<Value> for f32 {
-    fn into(self) -> Value {
-        Value::Float32(self)
+impl From<f32> for Value {
+    fn from(val: f32) -> Self {
+        Value::Float32(val)
     }
 }
 
-impl Into<Value> for String {
-    fn into(self) -> Value {
-        Value::String(self.into_bytes())
+impl From<String> for Value {
+    fn from(val: String) -> Self {
+        Value::String(val.into_bytes())
     }
 }
 
-impl Into<Value> for &str {
-    fn into(self) -> Value {
-        Value::String(self.as_bytes().to_vec())
+impl From<&str> for Value {
+    fn from(val: &str) -> Self {
+        Value::String(val.as_bytes().to_vec())
     }
 }
 

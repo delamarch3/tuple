@@ -292,7 +292,7 @@ fn evaluate_concat(tuple: &Tuple, schema: &Schema, args: &Vec<Expr>) -> Value {
     let mut s = Vec::new();
 
     for expr in args {
-        let value = evaluate(tuple, schema, &expr);
+        let value = evaluate(tuple, schema, expr);
         match value {
             Value::String(value) => s.extend(value),
             Value::Int8(value) => s.extend(value.to_string().bytes()),
