@@ -1,5 +1,6 @@
 use crate::schema::{Column, Schema};
-use crate::tuple::{Tuple, Value};
+use crate::tuple::Tuple;
+use crate::value::Value;
 
 #[derive(Clone, Copy)]
 pub enum ArithmeticOperator {
@@ -395,7 +396,8 @@ fn evaluate_logical_binary_op(lhs: Value, op: LogicalOperator, rhs: Value) -> Va
 #[cfg(test)]
 mod test {
     use crate::schema::{Schema, Type};
-    use crate::tuple::{TupleBuilder, Value};
+    use crate::tuple::TupleBuilder;
+    use crate::value::Value;
 
     use super::{concat, evaluate, ident, lit, null};
 
