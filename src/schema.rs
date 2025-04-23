@@ -52,6 +52,10 @@ impl Schema {
         self.columns.iter().map(|Column { position, .. }| *position)
     }
 
+    pub fn types(&self) -> impl Iterator<Item = Type> + use<'_> {
+        self.columns.iter().map(|Column { r#type, .. }| *r#type)
+    }
+
     pub fn len(&self) -> usize {
         self.columns.len()
     }
@@ -62,6 +66,10 @@ impl Schema {
 
     pub fn size(&self) -> usize {
         self.size
+    }
+
+    pub fn nulls_size(&self) -> usize {
+        (self.columns.len() / 8) + 1
     }
 
     pub fn get_type(&self, i: usize) -> Type {

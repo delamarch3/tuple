@@ -147,6 +147,7 @@ impl Expr {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn add(self, rhs: impl Into<Expr>) -> Self {
         Expr::BinaryOp {
             lhs: Box::new(self),
@@ -155,6 +156,7 @@ impl Expr {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn sub(self, rhs: impl Into<Expr>) -> Self {
         Expr::BinaryOp {
             lhs: Box::new(self),
@@ -163,6 +165,7 @@ impl Expr {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn mul(self, rhs: impl Into<Expr>) -> Self {
         Expr::BinaryOp {
             lhs: Box::new(self),
@@ -171,6 +174,7 @@ impl Expr {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn div(self, rhs: impl Into<Expr>) -> Self {
         Expr::BinaryOp {
             lhs: Box::new(self),

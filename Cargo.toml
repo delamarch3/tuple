@@ -5,3 +5,10 @@ edition = "2021"
 
 [dependencies]
 bytes = "1.10.1"
+
+[dev-dependencies]
+criterion = "0.5.1"
+
+[[bench]]
+name = "evaluate"
+harness = false

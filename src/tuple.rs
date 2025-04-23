@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::io::{self, Read, Write};
 
 use bytes::{BufMut, BytesMut};
 
@@ -145,8 +146,15 @@ impl Tuple {
         Equal
     }
 
-    pub fn from_bytes(schema: &Schema, bytes: &[u8]) -> Tuple {
-        let nulls_size = (schema.columns().len() / 8) + 1;
+    pub fn write_to(&self, w: &mut impl Write) -> io::Result<()> {
+        w.write_all(self.null_bytes())?;
+        w.write_all(self.data_bytes())?;
+
+        Ok(())
+    }
+
+    pub fn from_bytes(bytes: &[u8], schema: &Schema) -> Tuple {
+        let nulls_size = schema.nulls_size();
         let data_size = schema.size();
 
         let nulls = bytes[0..nulls_size].to_vec();
@@ -158,6 +166,29 @@ impl Tuple {
         let data = BytesMut::from(&bytes[nulls_size..nulls_size + data_size + strings_size]);
 
         Self { nulls, data }
+    }
+
+    pub fn read_from(r: &mut impl Read, schema: &Schema) -> io::Result<Tuple> {
+        let nulls_size = schema.nulls_size();
+        let data_size = schema.size();
+
+        let mut nulls = vec![0; nulls_size];
+        r.read_exact(&mut nulls)?;
+
+        let mut data = BytesMut::zeroed(data_size);
+        r.read_exact(&mut data)?;
+
+        let strings_size = schema.string_pointer_offsets().fold(0, |acc, offset| {
+            let length = u16::from_be_bytes(data[offset + 2..offset + 4].try_into().unwrap());
+            acc + length
+        }) as usize;
+
+        let mut strings = vec![0; strings_size];
+        r.read_exact(&mut strings)?;
+
+        data.extend(strings);
+
+        Ok(Self { nulls, data })
     }
 }
 
@@ -193,7 +224,7 @@ pub struct TupleBuilder<'a> {
 
 impl<'a> TupleBuilder<'a> {
     pub fn new(schema: &'a Schema) -> Self {
-        let nulls_len = (schema.columns().len() / 8) + 1;
+        let nulls_len = schema.nulls_size();
         let data_size = schema.size();
 
         let mut nulls = Vec::new();
@@ -212,6 +243,7 @@ impl<'a> TupleBuilder<'a> {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn add(self, value: Value) -> Self {
         match value {
             Value::String(value) => self.string(&value),
@@ -291,7 +323,7 @@ impl<'a> TupleBuilder<'a> {
 #[cfg(test)]
 mod test {
     use std::cmp::Ordering::*;
-    use std::io::{Cursor, Read, Write};
+    use std::io::{Cursor, Read};
 
     use super::{Tuple, TupleBuilder};
     use crate::schema::{Schema, Type};
@@ -460,15 +492,20 @@ mod test {
 
         let mut c = Cursor::new(Vec::new());
         tuples.iter().for_each(|tuple| {
-            c.write(tuple.null_bytes()).unwrap();
-            c.write(tuple.data_bytes()).unwrap();
+            tuple.write_to(&mut c).unwrap();
+        });
+
+        c.set_position(0);
+        tuples.iter().for_each(|want| {
+            let have = Tuple::read_from(&mut c, &schema).unwrap();
+            assert_eq!(want.cmp(&have, &schema), Equal);
         });
 
         c.set_position(0);
         tuples.iter().for_each(|want| {
             let mut buf = vec![0; want.size()];
             c.read_exact(&mut buf).unwrap();
-            let have = Tuple::from_bytes(&schema, &buf);
+            let have = Tuple::from_bytes(&buf, &schema);
             assert_eq!(want.cmp(&have, &schema), Equal);
         });
 
