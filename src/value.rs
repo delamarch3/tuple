@@ -1,23 +1,24 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Value {
-    String(Vec<u8>),
+pub enum Value<'a> {
+    String(Cow<'a, [u8]>),
     Int8(i8),
     Int32(i32),
     Float32(f32),
     Null,
 }
 
-impl Eq for Value {}
+impl<'a> Eq for Value<'a> {}
 
-impl PartialOrd for Value {
+impl<'a> PartialOrd for Value<'a> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for Value {
+impl<'a> Ord for Value<'a> {
     fn cmp(&self, other: &Self) -> Ordering {
         use Ordering::*;
 
@@ -50,14 +51,14 @@ impl Ord for Value {
     }
 }
 
-impl std::ops::Add for Value {
-    type Output = Value;
+impl<'a> std::ops::Add for Value<'a> {
+    type Output = Value<'a>;
 
     fn add(self, rhs: Self) -> Self::Output {
         match self {
             Value::String(mut lhs) => match rhs {
                 Value::String(rhs) => {
-                    lhs.extend(rhs);
+                    lhs.to_mut().extend(rhs.iter());
                     Value::String(lhs)
                 }
                 _ => panic!("unsupported operation"),
@@ -82,8 +83,8 @@ impl std::ops::Add for Value {
     }
 }
 
-impl std::ops::Sub for Value {
-    type Output = Value;
+impl<'a> std::ops::Sub for Value<'a> {
+    type Output = Value<'a>;
 
     fn sub(self, rhs: Self) -> Self::Output {
         match self {
@@ -108,8 +109,8 @@ impl std::ops::Sub for Value {
     }
 }
 
-impl std::ops::Mul for Value {
-    type Output = Value;
+impl<'a> std::ops::Mul for Value<'a> {
+    type Output = Value<'a>;
 
     fn mul(self, rhs: Self) -> Self::Output {
         match self {
@@ -134,8 +135,8 @@ impl std::ops::Mul for Value {
     }
 }
 
-impl std::ops::Div for Value {
-    type Output = Value;
+impl<'a> std::ops::Div for Value<'a> {
+    type Output = Value<'a>;
 
     fn div(self, rhs: Self) -> Self::Output {
         match self {
@@ -160,37 +161,37 @@ impl std::ops::Div for Value {
     }
 }
 
-impl From<i8> for Value {
+impl<'a> From<i8> for Value<'a> {
     fn from(val: i8) -> Self {
         Value::Int8(val)
     }
 }
 
-impl From<i32> for Value {
+impl<'a> From<i32> for Value<'a> {
     fn from(val: i32) -> Self {
         Value::Int32(val)
     }
 }
 
-impl From<f32> for Value {
+impl<'a> From<f32> for Value<'a> {
     fn from(val: f32) -> Self {
         Value::Float32(val)
     }
 }
 
-impl From<String> for Value {
+impl<'a> From<String> for Value<'a> {
     fn from(val: String) -> Self {
-        Value::String(val.into_bytes())
+        Value::String(Cow::Owned(val.into_bytes()))
     }
 }
 
-impl From<&str> for Value {
-    fn from(val: &str) -> Self {
-        Value::String(val.as_bytes().to_vec())
+impl<'a> From<&'a str> for Value<'a> {
+    fn from(val: &'a str) -> Self {
+        Value::String(Cow::Borrowed(val.as_bytes()))
     }
 }
 
-impl Value {
+impl<'a> Value<'a> {
     pub fn is_zero(&self) -> bool {
         match self {
             Value::String(value) => value.is_empty(),

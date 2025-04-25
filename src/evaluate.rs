@@ -43,10 +43,19 @@ pub enum Ident {
     QualifiedColumn { table: String, name: String },
 }
 
+#[allow(unused)]
+enum Literal {
+    Number(String),
+    Decimal(String),
+    String(String),
+    Bool(bool),
+    Null,
+}
+
 pub enum Expr {
     Ident(Ident),
     Function(Function),
-    Literal(Value),
+    Literal(Value<'static>),
     IsNull {
         expr: Box<Expr>,
         negated: bool,
@@ -83,7 +92,7 @@ pub fn ident(value: &str) -> Expr {
     }
 }
 
-pub fn lit(value: impl Into<Value>) -> Expr {
+pub fn lit(value: impl Into<Value<'static>>) -> Expr {
     Expr::Literal(value.into())
 }
 
@@ -255,7 +264,7 @@ impl Expr {
     }
 }
 
-pub fn evaluate(tuple: &Tuple, schema: &Schema, expr: &Expr) -> Value {
+pub fn evaluate<'a>(tuple: &'a Tuple, schema: &Schema, expr: &Expr) -> Value<'a> {
     match expr {
         Expr::Ident(ident) => evaluate_ident(tuple, schema, ident),
         Expr::Function(function) => evaluate_function(tuple, schema, function),
@@ -276,7 +285,7 @@ pub fn evaluate(tuple: &Tuple, schema: &Schema, expr: &Expr) -> Value {
     }
 }
 
-fn evaluate_ident(tuple: &Tuple, schema: &Schema, ident: &Ident) -> Value {
+fn evaluate_ident<'a>(tuple: &'a Tuple, schema: &Schema, ident: &Ident) -> Value<'a> {
     // TODO: Having to find the position here will be slow. The column positions should be cached in
     // the expression.
     let position = match ident {
@@ -290,7 +299,7 @@ fn evaluate_ident(tuple: &Tuple, schema: &Schema, ident: &Ident) -> Value {
     tuple.get(schema, position)
 }
 
-fn evaluate_function(tuple: &Tuple, schema: &Schema, function: &Function) -> Value {
+fn evaluate_function<'a>(tuple: &'a Tuple, schema: &Schema, function: &Function) -> Value<'a> {
     // TODO: This can be improved too. It would be better to have the function implementation as
     // part of the expression, instead of matching here.
     match function.name.as_str() {
@@ -300,13 +309,13 @@ fn evaluate_function(tuple: &Tuple, schema: &Schema, function: &Function) -> Val
     }
 }
 
-fn evaluate_concat(tuple: &Tuple, schema: &Schema, args: &Vec<Expr>) -> Value {
+fn evaluate_concat<'a>(tuple: &'a Tuple, schema: &Schema, args: &Vec<Expr>) -> Value<'a> {
     let mut s = Vec::new();
 
     for expr in args {
         let value = evaluate(tuple, schema, expr);
         match value {
-            Value::String(value) => s.extend(value),
+            Value::String(value) => s.extend(value.iter()),
             Value::Int8(value) => s.extend(value.to_string().bytes()),
             Value::Int32(value) => s.extend(value.to_string().bytes()),
             Value::Float32(value) => s.extend(value.to_string().bytes()),
@@ -314,10 +323,10 @@ fn evaluate_concat(tuple: &Tuple, schema: &Schema, args: &Vec<Expr>) -> Value {
         }
     }
 
-    Value::String(s)
+    Value::String(s.into())
 }
 
-fn evaluate_contains(tuple: &Tuple, schema: &Schema, args: &Vec<Expr>) -> Value {
+fn evaluate_contains<'a>(tuple: &'a Tuple, schema: &Schema, args: &Vec<Expr>) -> Value<'a> {
     let (string, pattern) = (&args[0], &args[1]);
 
     let Value::String(string) = evaluate(tuple, schema, string) else {
@@ -334,19 +343,24 @@ fn evaluate_contains(tuple: &Tuple, schema: &Schema, args: &Vec<Expr>) -> Value 
     Value::Int8(string.contains(pattern) as i8)
 }
 
-fn evaluate_is_null(tuple: &Tuple, schema: &Schema, expr: &Expr, negated: bool) -> Value {
+fn evaluate_is_null<'a>(
+    tuple: &'a Tuple,
+    schema: &Schema,
+    expr: &Expr,
+    negated: bool,
+) -> Value<'a> {
     let value = evaluate(tuple, schema, expr);
     let is_null = matches!(value, Value::Null);
     Value::Int8((is_null && !negated) as i8)
 }
 
-fn evaluate_in_list(
-    tuple: &Tuple,
+fn evaluate_in_list<'a>(
+    tuple: &'a Tuple,
     schema: &Schema,
     expr: &Expr,
     list: &Vec<Expr>,
     negated: bool,
-) -> Value {
+) -> Value<'a> {
     let mut found = false;
     let search = evaluate(tuple, schema, expr);
     for expr in list {
@@ -360,27 +374,27 @@ fn evaluate_in_list(
     Value::Int8((found && !negated) as i8)
 }
 
-fn evaluate_between(
-    tuple: &Tuple,
+fn evaluate_between<'a>(
+    tuple: &'a Tuple,
     schema: &Schema,
     expr: &Expr,
     low: &Expr,
     high: &Expr,
     negated: bool,
-) -> Value {
+) -> Value<'a> {
     let value = evaluate(tuple, schema, expr);
     let low = evaluate(tuple, schema, low);
     let high = evaluate(tuple, schema, high);
     Value::Int8(((value >= low && value <= high) && !negated) as i8)
 }
 
-fn evaluate_binary_op(
-    tuple: &Tuple,
+fn evaluate_binary_op<'a>(
+    tuple: &'a Tuple,
     schema: &Schema,
     lhs: &Expr,
     op: Operator,
     rhs: &Expr,
-) -> Value {
+) -> Value<'a> {
     let lhs = evaluate(tuple, schema, lhs);
     let rhs = evaluate(tuple, schema, rhs);
 
@@ -391,7 +405,11 @@ fn evaluate_binary_op(
     }
 }
 
-fn evaluate_arithmetic_binary_op(lhs: Value, op: ArithmeticOperator, rhs: Value) -> Value {
+fn evaluate_arithmetic_binary_op<'a>(
+    lhs: Value<'a>,
+    op: ArithmeticOperator,
+    rhs: Value<'a>,
+) -> Value<'a> {
     match op {
         ArithmeticOperator::Add => lhs + rhs,
         ArithmeticOperator::Sub => lhs - rhs,
@@ -400,7 +418,11 @@ fn evaluate_arithmetic_binary_op(lhs: Value, op: ArithmeticOperator, rhs: Value)
     }
 }
 
-fn evaluate_comparison_binary_op(lhs: Value, op: ComparisonOperator, rhs: Value) -> Value {
+fn evaluate_comparison_binary_op<'a>(
+    lhs: Value<'a>,
+    op: ComparisonOperator,
+    rhs: Value<'a>,
+) -> Value<'a> {
     let result = match op {
         ComparisonOperator::Lt => lhs < rhs,
         ComparisonOperator::Le => lhs <= rhs,
@@ -413,7 +435,11 @@ fn evaluate_comparison_binary_op(lhs: Value, op: ComparisonOperator, rhs: Value)
     Value::Int8(result as i8)
 }
 
-fn evaluate_logical_binary_op(lhs: Value, op: LogicalOperator, rhs: Value) -> Value {
+fn evaluate_logical_binary_op<'a>(
+    lhs: Value<'a>,
+    op: LogicalOperator,
+    rhs: Value<'a>,
+) -> Value<'a> {
     let result = match op {
         LogicalOperator::And => !lhs.is_zero() && !rhs.is_zero(),
         LogicalOperator::Or => !lhs.is_zero() || !rhs.is_zero(),
@@ -438,12 +464,13 @@ mod test {
         [
             (lit(1 as i32).add(lit(2 as i32)), Value::Int32(3)),
             (lit(1 as i32).add(null()), Value::Int32(1)),
-            (lit("a").add(lit("b")), Value::String(b"ab".to_vec())),
+            (lit("a").add(lit("b")), Value::String(b"ab".into())),
             (
                 concat(vec![lit("a"), lit("b")]),
-                Value::String(b"ab".to_vec()),
+                Value::String(b"ab".into()),
             ),
             (contains(vec![lit("abc"), lit("bc")]), Value::Int8(1)),
+            (lit(2 as i32).lt(lit(1 as i32)), Value::Int8(0)),
         ]
         .into_iter()
         .for_each(|(expr, want)| {
@@ -478,7 +505,7 @@ mod test {
             ),
             (
                 ident("t1.c2").add(ident("t1.c2")),
-                Value::String(b"aa".to_vec()),
+                Value::String(b"aa".into()),
             ),
         ]
         .into_iter()

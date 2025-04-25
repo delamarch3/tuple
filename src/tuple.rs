@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::io::{self, Read, Write};
 
@@ -48,7 +49,7 @@ impl Tuple {
 
     /// Gets the value of the ith column of the schema. Note that the nullability of the column in
     /// the schema is ignored, null is returned based on the tuples null bitmap only.
-    pub fn get(&self, schema: &Schema, pos: usize) -> Value {
+    pub fn get<'a>(&'a self, schema: &Schema, pos: usize) -> Value<'a> {
         use Value::*;
 
         let r#type = schema.get_type(pos);
@@ -58,7 +59,7 @@ impl Tuple {
         };
 
         match r#type {
-            Type::String => String(bytes.to_vec()),
+            Type::String => String(Cow::Borrowed(bytes)),
             Type::Int8 => {
                 let value = i8::from_be_bytes(bytes.try_into().unwrap());
                 Int8(value)
@@ -104,16 +105,16 @@ impl Tuple {
 
         // TODO: handle overflow
         let first = match self.get(schema, 0) {
-            String(value) if value.is_empty() => String(vec![0]),
+            String(value) if value.is_empty() => String(Cow::Owned(vec![0])),
             String(mut value) => 'string: {
-                for b in value.iter_mut() {
+                for b in value.to_mut().iter_mut() {
                     if *b < 255 {
                         *b += 1;
                         break 'string String(value);
                     }
                 }
 
-                value.push(0);
+                value.to_mut().push(0);
                 String(value)
             }
             Int8(value) => Int8(value + 1),
@@ -322,6 +323,7 @@ impl<'a> TupleBuilder<'a> {
 
 #[cfg(test)]
 mod test {
+    use std::borrow::Cow;
     use std::cmp::Ordering::*;
     use std::io::{Cursor, Read};
 
@@ -347,7 +349,9 @@ mod test {
 
         [
             Int8(32),
-            String(b"the quick brown fox jumps over the lazy dog".to_vec()),
+            String(Cow::Borrowed(
+                b"the quick brown fox jumps over the lazy dog",
+            )),
             Null,
             Int32(7),
         ]
