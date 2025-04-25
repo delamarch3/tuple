@@ -98,6 +98,13 @@ pub fn concat(args: Vec<Expr>) -> Expr {
     })
 }
 
+pub fn contains(args: Vec<Expr>) -> Expr {
+    Expr::Function(Function {
+        name: "contains".into(),
+        args,
+    })
+}
+
 impl Expr {
     pub fn is_null(self) -> Self {
         Expr::IsNull {
@@ -288,6 +295,7 @@ fn evaluate_function(tuple: &Tuple, schema: &Schema, function: &Function) -> Val
     // part of the expression, instead of matching here.
     match function.name.as_str() {
         "concat" => evaluate_concat(tuple, schema, &function.args),
+        "contains" => evaluate_contains(tuple, schema, &function.args),
         _ => unimplemented!(),
     }
 }
@@ -307,6 +315,23 @@ fn evaluate_concat(tuple: &Tuple, schema: &Schema, args: &Vec<Expr>) -> Value {
     }
 
     Value::String(s)
+}
+
+fn evaluate_contains(tuple: &Tuple, schema: &Schema, args: &Vec<Expr>) -> Value {
+    let (string, pattern) = (&args[0], &args[1]);
+
+    let Value::String(string) = evaluate(tuple, schema, string) else {
+        unimplemented!()
+    };
+
+    let Value::String(pattern) = evaluate(tuple, schema, pattern) else {
+        unimplemented!()
+    };
+
+    let string = std::str::from_utf8(&string).unwrap();
+    let pattern = std::str::from_utf8(&pattern).unwrap();
+
+    Value::Int8(string.contains(pattern) as i8)
 }
 
 fn evaluate_is_null(tuple: &Tuple, schema: &Schema, expr: &Expr, negated: bool) -> Value {
@@ -403,7 +428,7 @@ mod test {
     use crate::tuple::TupleBuilder;
     use crate::value::Value;
 
-    use super::{concat, evaluate, ident, lit, null};
+    use super::{concat, contains, evaluate, ident, lit, null};
 
     #[test]
     fn test_constant_expressions() {
@@ -418,6 +443,7 @@ mod test {
                 concat(vec![lit("a"), lit("b")]),
                 Value::String(b"ab".to_vec()),
             ),
+            (contains(vec![lit("abc"), lit("bc")]), Value::Int8(1)),
         ]
         .into_iter()
         .for_each(|(expr, want)| {

@@ -2,7 +2,7 @@ use std::fs::File;
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use tuple::evaluate::{evaluate, ident, lit};
+use tuple::evaluate::{concat, contains, evaluate, ident, lit};
 use tuple::schema::{Schema, Type};
 use tuple::tuple::Tuple;
 
@@ -69,6 +69,21 @@ fn evaluate_benchmark(c: &mut Criterion) {
             }))
         })
     });
+
+    let expr = contains(vec![
+        concat(vec![ident("container"), ident("container")]),
+        lit("CANWRAP"),
+    ]);
+    c.bench_function(
+        "string functions (contains(concat(container, container), CANWRAP)",
+        |b| {
+            b.iter(|| {
+                black_box(tuples.iter().for_each(|tuple| {
+                    evaluate(&tuple, &schema, &expr);
+                }))
+            })
+        },
+    );
 }
 
 criterion_group!(benches, evaluate_benchmark);
