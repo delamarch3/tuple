@@ -51,7 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut tuple = TupleBuilder::new(&schema);
         let line = result?;
         let mut values = line.split('|');
-        let mut types = schema.types();
+        let mut types = schema.physical_attrs().map(|attr| attr.r#type);
         while let Some(r#type) = types.next() {
             let Some(value) = values.next() else {
                 eprintln!("unexpected end of row values on line {line_number}");

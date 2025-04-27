@@ -49,57 +49,6 @@ impl Tuple {
 
     /// Gets the value of the ith column of the schema. Note that the nullability of the column in
     /// the schema is ignored, null is returned based on the tuples null bitmap only.
-    /// TODO: remove this in favour of [`Self::get_by_physical_attrs()`]
-    pub fn get<'a>(&'a self, schema: &Schema, position: usize) -> Value<'a> {
-        let r#type = schema.get_type(position);
-
-        let Some(bytes) = self.get_bytes(schema, position) else {
-            return Value::Null;
-        };
-
-        match r#type {
-            Type::String => Value::String(Cow::Borrowed(bytes)),
-            Type::Int8 => {
-                let value = i8::from_be_bytes(bytes.try_into().unwrap());
-                Value::Int8(value)
-            }
-            Type::Int32 => {
-                let value = i32::from_be_bytes(bytes.try_into().unwrap());
-                Value::Int32(value)
-            }
-            Type::Float32 => {
-                let value = f32::from_be_bytes(bytes.try_into().unwrap());
-                Value::Float32(value)
-            }
-        }
-    }
-
-    /// Gets the bytes of the ith column of the schema. Note that the nullability of the column in
-    /// the schema is ignored, null is returned based on the tuples null bitmap only.
-    fn get_bytes<'a>(&'a self, schema: &Schema, position: usize) -> Option<&'a [u8]> {
-        let PhysicalAttrs { r#type, offset, .. } = schema.get_physical_attrs(position);
-
-        let i = position / 64;
-        let bit = position % 64;
-        if self.nulls[i] & (1 << bit) > 0 {
-            return None;
-        }
-
-        match r#type {
-            Type::String => {
-                let length =
-                    u16::from_be_bytes(self.data[offset + 2..offset + 4].try_into().unwrap())
-                        as usize;
-                let offset =
-                    u16::from_be_bytes(self.data[offset..offset + 2].try_into().unwrap()) as usize;
-                Some(&self.data[offset..offset + length])
-            }
-            _ => Some(&self.data[offset..offset + r#type.size()]),
-        }
-    }
-
-    /// Gets the value of the ith column of the schema. Note that the nullability of the column in
-    /// the schema is ignored, null is returned based on the tuples null bitmap only.
     #[inline]
     pub fn get_by_physical_attrs<'a>(
         &'a self,
@@ -153,31 +102,31 @@ impl Tuple {
 
     /// Creates a new tuple which is greater than the current one by the first value.
     pub fn next(&self, schema: &Schema) -> Self {
-        use Value::*;
-
         // TODO: handle overflow
-        let first = match self.get(schema, 0) {
-            String(value) if value.is_empty() => String(Cow::Owned(vec![0])),
-            String(mut value) => 'string: {
+        let attrs = schema.get_physical_attrs(0);
+        let first = match self.get_by_physical_attrs(attrs) {
+            Value::String(value) if value.is_empty() => Value::String(Cow::Owned(vec![0])),
+            Value::String(mut value) => 'string: {
                 for b in value.to_mut().iter_mut() {
                     if *b < 255 {
                         *b += 1;
-                        break 'string String(value);
+                        break 'string Value::String(value);
                     }
                 }
 
                 value.to_mut().push(0);
-                String(value)
+                Value::String(value)
             }
-            Int8(value) => Int8(value + 1),
-            Int32(value) => Int32(value + 1),
-            Float32(value) => Float32(value + f32::EPSILON),
-            Null => todo!(), // This would need to turn into a non-null value by consulting the schema
+            Value::Int8(value) => Value::Int8(value + 1),
+            Value::Int32(value) => Value::Int32(value + 1),
+            Value::Float32(value) => Value::Float32(value + f32::EPSILON),
+            Value::Null => todo!(), // This would need to turn into a non-null value by consulting the schema
         };
 
         (1..schema.len())
-            .fold(TupleBuilder::new(schema).add(first), |b, i| {
-                b.add(self.get(schema, i))
+            .map(|i| schema.get_physical_attrs(i))
+            .fold(TupleBuilder::new(schema).add(first), |b, attrs| {
+                b.add(self.get_by_physical_attrs(attrs))
             })
             .finish()
     }
@@ -186,9 +135,9 @@ impl Tuple {
     pub fn cmp(&self, other: &Tuple, schema: &Schema) -> Ordering {
         use Ordering::*;
 
-        for pos in schema.positions() {
-            let lhs = self.get(schema, pos);
-            let rhs = other.get(schema, pos);
+        for attrs in schema.physical_attrs() {
+            let lhs = self.get_by_physical_attrs(attrs);
+            let rhs = other.get_by_physical_attrs(attrs);
 
             match lhs.cmp(&rhs) {
                 ord @ Less | ord @ Greater => return ord,
@@ -253,8 +202,8 @@ pub fn fit_tuple_with_schema(tuple: &Tuple, schema: &Schema) -> Tuple {
     let mut compact_schema = schema.clone();
     compact_schema.compact();
     let mut builder = TupleBuilder::new(&compact_schema);
-    for position in schema.positions() {
-        let value = tuple.get(schema, position);
+    for attrs in schema.physical_attrs() {
+        let value = tuple.get_by_physical_attrs(attrs);
         builder = builder.add(value);
     }
 
@@ -408,8 +357,8 @@ mod test {
             Int32(7),
         ]
         .into_iter()
-        .enumerate()
-        .for_each(|(i, want)| assert_eq!(tuple.get(&schema, i), want));
+        .zip(schema.physical_attrs())
+        .for_each(|(want, attrs)| assert_eq!(tuple.get_by_physical_attrs(attrs), want));
     }
 
     #[test]
@@ -438,7 +387,9 @@ mod test {
         .into_iter()
         .for_each(|want| {
             let mut builder = TupleBuilder::new(&schema);
-            builder = (0..schema.len()).fold(builder, |b, i| b.add(want.get(&schema, i)));
+            builder = (0..schema.len())
+                .map(|i| schema.get_physical_attrs(i))
+                .fold(builder, |b, attrs| b.add(want.get_by_physical_attrs(attrs)));
             let have = builder.finish();
 
             assert_eq!(want, have);

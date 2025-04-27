@@ -63,12 +63,8 @@ impl Schema {
         &self.columns
     }
 
-    pub fn positions(&self) -> impl Iterator<Item = usize> + use<'_> {
-        self.columns.iter().map(|Column { position, .. }| *position)
-    }
-
-    pub fn types(&self) -> impl Iterator<Item = Type> + use<'_> {
-        self.columns.iter().map(|Column { r#type, .. }| *r#type)
+    pub fn physical_attrs(&self) -> impl Iterator<Item = PhysicalAttrs> + use<'_> {
+        self.columns.iter().map(Column::physical_attrs)
     }
 
     pub fn len(&self) -> usize {
