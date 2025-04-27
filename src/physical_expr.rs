@@ -6,7 +6,7 @@ use crate::expr::{
     Expr, Function as ExprFunction, Ident as ExprIdent, Literal as ExprLiteral,
     LogicalOperator as ExprLogicalOperator, Operator as ExprOperator,
 };
-use crate::schema::{Column, Schema, Type};
+use crate::schema::{Column, PhysicalAttrs, Schema};
 use crate::tuple::Tuple;
 use crate::value::Value;
 
@@ -43,14 +43,8 @@ pub enum Operator {
 
 pub type Function = for<'a> fn(tuple: &'a Tuple, args: &Vec<PhysicalExpr>) -> Value<'a>;
 
-pub struct ValueAttrs {
-    pub r#type: Type,
-    pub position: usize,
-    pub offset: usize,
-}
-
 pub enum PhysicalExpr {
-    Ident(ValueAttrs),
+    Ident(PhysicalAttrs),
     Function(Function, Vec<PhysicalExpr>),
     Value(Value<'static>),
     IsNull {
@@ -99,7 +93,7 @@ impl PhysicalExpr {
 }
 
 fn physical_ident(ident: ExprIdent, schema: &Schema) -> PhysicalExpr {
-    let (r#type, position, offset) = match ident {
+    let attrs = match ident {
         ExprIdent::Column(name) => schema
             .find_column(&name)
             .map(Column::physical_attrs)
@@ -110,11 +104,7 @@ fn physical_ident(ident: ExprIdent, schema: &Schema) -> PhysicalExpr {
             .unwrap(),
     };
 
-    PhysicalExpr::Ident(ValueAttrs {
-        r#type,
-        position,
-        offset,
-    })
+    PhysicalExpr::Ident(attrs)
 }
 
 fn physical_function(function: ExprFunction, schema: &Schema) -> PhysicalExpr {

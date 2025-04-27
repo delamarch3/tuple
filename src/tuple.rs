@@ -4,7 +4,7 @@ use std::io::{self, Read, Write};
 
 use bytes::{BufMut, BytesMut};
 
-use crate::schema::{Schema, Type};
+use crate::schema::{PhysicalAttrs, Schema, Type};
 use crate::value::Value;
 
 /// The layout of the tuple is:
@@ -77,24 +77,19 @@ impl Tuple {
     /// Gets the bytes of the ith column of the schema. Note that the nullability of the column in
     /// the schema is ignored, null is returned based on the tuples null bitmap only.
     pub fn get_bytes<'a>(&'a self, schema: &Schema, position: usize) -> Option<&'a [u8]> {
-        let (r#type, offset) = schema.get_physical_attrs(position);
-        self.get_bytes_by_physical_attrs(r#type, position, offset)
+        let attrs = schema.get_physical_attrs(position);
+        self.get_bytes_by_physical_attrs(attrs)
     }
 
     /// Gets the value of the ith column of the schema. Note that the nullability of the column in
     /// the schema is ignored, null is returned based on the tuples null bitmap only.
     #[inline]
-    pub fn get_by_physical_attrs<'a>(
-        &'a self,
-        r#type: Type,
-        position: usize,
-        offset: usize,
-    ) -> Value<'a> {
-        let Some(bytes) = self.get_bytes_by_physical_attrs(r#type, position, offset) else {
+    pub fn get_by_physical_attrs<'a>(&'a self, attrs: PhysicalAttrs) -> Value<'a> {
+        let Some(bytes) = self.get_bytes_by_physical_attrs(attrs) else {
             return Value::Null;
         };
 
-        match r#type {
+        match attrs.r#type {
             Type::String => Value::String(Cow::Borrowed(bytes)),
             Type::Int8 => {
                 let value = i8::from_be_bytes(bytes.try_into().unwrap());
@@ -114,9 +109,11 @@ impl Tuple {
     #[inline]
     pub fn get_bytes_by_physical_attrs<'a>(
         &'a self,
-        r#type: Type,
-        position: usize,
-        offset: usize,
+        PhysicalAttrs {
+            r#type,
+            position,
+            offset,
+        }: PhysicalAttrs,
     ) -> Option<&'a [u8]> {
         let i = position / 8;
         let bit = position % 8;

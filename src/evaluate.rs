@@ -1,13 +1,13 @@
 use crate::physical_expr::{
     ArithmeticOperator, ComparisonOperator, LogicalOperator, Operator, PhysicalExpr as Expr,
-    ValueAttrs,
 };
+use crate::schema::PhysicalAttrs;
 use crate::tuple::Tuple;
 use crate::value::Value;
 
 pub fn evaluate<'a>(tuple: &'a Tuple, expr: &Expr) -> Value<'a> {
     match expr {
-        Expr::Ident(ident) => evaluate_ident(tuple, ident),
+        Expr::Ident(ident) => evaluate_ident(tuple, *ident),
         Expr::Function(evaluate_function, args) => evaluate_function(tuple, args),
         Expr::Value(value) => value.clone(),
         Expr::IsNull { expr, negated } => evaluate_is_null(tuple, expr, *negated),
@@ -26,15 +26,8 @@ pub fn evaluate<'a>(tuple: &'a Tuple, expr: &Expr) -> Value<'a> {
     }
 }
 
-fn evaluate_ident<'a>(
-    tuple: &'a Tuple,
-    ValueAttrs {
-        r#type,
-        position,
-        offset,
-    }: &ValueAttrs,
-) -> Value<'a> {
-    tuple.get_by_physical_attrs(*r#type, *position, *offset)
+fn evaluate_ident<'a>(tuple: &'a Tuple, attrs: PhysicalAttrs) -> Value<'a> {
+    tuple.get_by_physical_attrs(attrs)
 }
 
 pub fn concat<'a>(tuple: &'a Tuple, args: &Vec<Expr>) -> Value<'a> {

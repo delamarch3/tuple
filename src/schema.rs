@@ -27,13 +27,24 @@ pub struct Column {
     nullable: bool,
 }
 
+#[derive(Clone, Copy)]
+pub struct PhysicalAttrs {
+    pub r#type: Type,
+    pub position: usize,
+    pub offset: usize,
+}
+
 impl Column {
     pub fn position(&self) -> usize {
         self.position
     }
 
-    pub fn physical_attrs(&self) -> (Type, usize, usize) {
-        (self.r#type, self.position, self.offset)
+    pub fn physical_attrs(&self) -> PhysicalAttrs {
+        PhysicalAttrs {
+            r#type: self.r#type,
+            position: self.position,
+            offset: self.offset,
+        }
     }
 
     pub fn nullable(&self) -> bool {
@@ -80,8 +91,8 @@ impl Schema {
         self.columns[i].r#type
     }
 
-    pub fn get_physical_attrs(&self, pos: usize) -> (Type, usize) {
-        (self.columns[pos].r#type, self.columns[pos].offset)
+    pub fn get_physical_attrs(&self, i: usize) -> PhysicalAttrs {
+        self.columns[i].physical_attrs()
     }
 
     pub fn string_pointer_offsets(&self) -> impl Iterator<Item = usize> + use<'_> {
