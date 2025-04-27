@@ -1,60 +1,47 @@
-use crate::expr::{
-    ArithmeticOperator, ComparisonOperator, Expr, Function, Ident, LogicalOperator, Operator,
+use crate::physical_expr::{
+    ArithmeticOperator, ComparisonOperator, LogicalOperator, Operator, PhysicalExpr as Expr,
+    ValueAttrs,
 };
-use crate::schema::{Column, Schema};
 use crate::tuple::Tuple;
 use crate::value::Value;
 
-pub fn evaluate<'a>(tuple: &'a Tuple, schema: &Schema, expr: &Expr) -> Value<'a> {
+pub fn evaluate<'a>(tuple: &'a Tuple, expr: &Expr) -> Value<'a> {
     match expr {
-        Expr::Ident(ident) => evaluate_ident(tuple, schema, ident),
-        Expr::Function(function) => evaluate_function(tuple, schema, function),
-        Expr::Literal(value) => value.clone(),
-        Expr::IsNull { expr, negated } => evaluate_is_null(tuple, schema, expr, *negated),
+        Expr::Ident(ident) => evaluate_ident(tuple, ident),
+        Expr::Function(evaluate_function, args) => evaluate_function(tuple, args),
+        Expr::Value(value) => value.clone(),
+        Expr::IsNull { expr, negated } => evaluate_is_null(tuple, expr, *negated),
         Expr::InList {
             expr,
             list,
             negated,
-        } => evaluate_in_list(tuple, schema, expr, list, *negated),
+        } => evaluate_in_list(tuple, expr, list, *negated),
         Expr::Between {
             expr,
             low,
             high,
             negated,
-        } => evaluate_between(tuple, schema, expr, low, high, *negated),
-        Expr::BinaryOp { lhs, op, rhs } => evaluate_binary_op(tuple, schema, lhs, *op, rhs),
+        } => evaluate_between(tuple, expr, low, high, *negated),
+        Expr::BinaryOp { lhs, op, rhs } => evaluate_binary_op(tuple, lhs, *op, rhs),
     }
 }
 
-fn evaluate_ident<'a>(tuple: &'a Tuple, schema: &Schema, ident: &Ident) -> Value<'a> {
-    // TODO: Having to find the position here will be slow. The column positions should be cached in
-    // the expression.
-    let position = match ident {
-        Ident::Column(name) => schema.find_column(name).map(Column::position).unwrap(),
-        Ident::QualifiedColumn { table, name } => schema
-            .find_qualified_column(table, name)
-            .map(Column::position)
-            .unwrap(),
-    };
-
-    tuple.get(schema, position)
+fn evaluate_ident<'a>(
+    tuple: &'a Tuple,
+    ValueAttrs {
+        r#type,
+        position,
+        offset,
+    }: &ValueAttrs,
+) -> Value<'a> {
+    tuple.get_by_physical_attrs(*r#type, *position, *offset)
 }
 
-fn evaluate_function<'a>(tuple: &'a Tuple, schema: &Schema, function: &Function) -> Value<'a> {
-    // TODO: This can be improved too. It would be better to have the function implementation as
-    // part of the expression, instead of matching here.
-    match function.name.as_str() {
-        "concat" => evaluate_concat(tuple, schema, &function.args),
-        "contains" => evaluate_contains(tuple, schema, &function.args),
-        _ => unimplemented!(),
-    }
-}
-
-fn evaluate_concat<'a>(tuple: &'a Tuple, schema: &Schema, args: &Vec<Expr>) -> Value<'a> {
+pub fn concat<'a>(tuple: &'a Tuple, args: &Vec<Expr>) -> Value<'a> {
     let mut s = Vec::new();
 
     for expr in args {
-        let value = evaluate(tuple, schema, expr);
+        let value = evaluate(tuple, expr);
         match value {
             Value::String(value) => s.extend(value.iter()),
             Value::Int8(value) => s.extend(value.to_string().bytes()),
@@ -67,14 +54,14 @@ fn evaluate_concat<'a>(tuple: &'a Tuple, schema: &Schema, args: &Vec<Expr>) -> V
     Value::String(s.into())
 }
 
-fn evaluate_contains<'a>(tuple: &'a Tuple, schema: &Schema, args: &Vec<Expr>) -> Value<'a> {
+pub fn contains<'a>(tuple: &'a Tuple, args: &Vec<Expr>) -> Value<'a> {
     let (string, pattern) = (&args[0], &args[1]);
 
-    let Value::String(string) = evaluate(tuple, schema, string) else {
+    let Value::String(string) = evaluate(tuple, string) else {
         unimplemented!()
     };
 
-    let Value::String(pattern) = evaluate(tuple, schema, pattern) else {
+    let Value::String(pattern) = evaluate(tuple, pattern) else {
         unimplemented!()
     };
 
@@ -84,28 +71,22 @@ fn evaluate_contains<'a>(tuple: &'a Tuple, schema: &Schema, args: &Vec<Expr>) ->
     Value::Int8(string.contains(pattern) as i8)
 }
 
-fn evaluate_is_null<'a>(
-    tuple: &'a Tuple,
-    schema: &Schema,
-    expr: &Expr,
-    negated: bool,
-) -> Value<'a> {
-    let value = evaluate(tuple, schema, expr);
+fn evaluate_is_null<'a>(tuple: &'a Tuple, expr: &Expr, negated: bool) -> Value<'a> {
+    let value = evaluate(tuple, expr);
     let is_null = matches!(value, Value::Null);
     Value::Int8((is_null && !negated) as i8)
 }
 
 fn evaluate_in_list<'a>(
     tuple: &'a Tuple,
-    schema: &Schema,
     expr: &Expr,
     list: &Vec<Expr>,
     negated: bool,
 ) -> Value<'a> {
     let mut found = false;
-    let search = evaluate(tuple, schema, expr);
+    let search = evaluate(tuple, expr);
     for expr in list {
-        let value = evaluate(tuple, schema, expr);
+        let value = evaluate(tuple, expr);
         if search == value {
             found = true;
             break;
@@ -117,27 +98,20 @@ fn evaluate_in_list<'a>(
 
 fn evaluate_between<'a>(
     tuple: &'a Tuple,
-    schema: &Schema,
     expr: &Expr,
     low: &Expr,
     high: &Expr,
     negated: bool,
 ) -> Value<'a> {
-    let value = evaluate(tuple, schema, expr);
-    let low = evaluate(tuple, schema, low);
-    let high = evaluate(tuple, schema, high);
+    let value = evaluate(tuple, expr);
+    let low = evaluate(tuple, low);
+    let high = evaluate(tuple, high);
     Value::Int8(((value >= low && value <= high) && !negated) as i8)
 }
 
-fn evaluate_binary_op<'a>(
-    tuple: &'a Tuple,
-    schema: &Schema,
-    lhs: &Expr,
-    op: Operator,
-    rhs: &Expr,
-) -> Value<'a> {
-    let lhs = evaluate(tuple, schema, lhs);
-    let rhs = evaluate(tuple, schema, rhs);
+fn evaluate_binary_op<'a>(tuple: &'a Tuple, lhs: &Expr, op: Operator, rhs: &Expr) -> Value<'a> {
+    let lhs = evaluate(tuple, lhs);
+    let rhs = evaluate(tuple, rhs);
 
     match op {
         Operator::Arithmetic(op) => evaluate_arithmetic_binary_op(lhs, op, rhs),
@@ -192,6 +166,7 @@ fn evaluate_logical_binary_op<'a>(
 #[cfg(test)]
 mod test {
     use crate::expr::{concat, contains, ident, lit, null};
+    use crate::physical_expr::PhysicalExpr;
     use crate::schema::{Schema, Type};
     use crate::tuple::TupleBuilder;
     use crate::value::Value;
@@ -216,7 +191,8 @@ mod test {
         ]
         .into_iter()
         .for_each(|(expr, want)| {
-            let have = evaluate(&tuple, &schema, &expr);
+            let expr = PhysicalExpr::new(expr, &schema);
+            let have = evaluate(&tuple, &expr);
             assert_eq!(want, have);
         });
     }
@@ -252,7 +228,8 @@ mod test {
         ]
         .into_iter()
         .for_each(|(expr, want)| {
-            let have = evaluate(&tuple, &schema, &expr);
+            let expr = PhysicalExpr::new(expr, &schema);
+            let have = evaluate(&tuple, &expr);
             assert_eq!(want, have);
         });
     }

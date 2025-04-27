@@ -49,39 +49,75 @@ impl Tuple {
 
     /// Gets the value of the ith column of the schema. Note that the nullability of the column in
     /// the schema is ignored, null is returned based on the tuples null bitmap only.
-    pub fn get<'a>(&'a self, schema: &Schema, pos: usize) -> Value<'a> {
-        use Value::*;
+    /// TODO: remove this in favour of [`Self::get_by_physical_attrs()`]
+    pub fn get<'a>(&'a self, schema: &Schema, position: usize) -> Value<'a> {
+        let r#type = schema.get_type(position);
 
-        let r#type = schema.get_type(pos);
-
-        let Some(bytes) = self.get_bytes(schema, pos) else {
-            return Null;
+        let Some(bytes) = self.get_bytes(schema, position) else {
+            return Value::Null;
         };
 
         match r#type {
-            Type::String => String(Cow::Borrowed(bytes)),
+            Type::String => Value::String(Cow::Borrowed(bytes)),
             Type::Int8 => {
                 let value = i8::from_be_bytes(bytes.try_into().unwrap());
-                Int8(value)
+                Value::Int8(value)
             }
             Type::Int32 => {
                 let value = i32::from_be_bytes(bytes.try_into().unwrap());
-                Int32(value)
+                Value::Int32(value)
             }
             Type::Float32 => {
                 let value = f32::from_be_bytes(bytes.try_into().unwrap());
-                Float32(value)
+                Value::Float32(value)
             }
         }
     }
 
     /// Gets the bytes of the ith column of the schema. Note that the nullability of the column in
     /// the schema is ignored, null is returned based on the tuples null bitmap only.
-    pub fn get_bytes<'a>(&'a self, schema: &Schema, pos: usize) -> Option<&'a [u8]> {
-        let (r#type, offset) = schema.get_physical_attrs(pos);
+    pub fn get_bytes<'a>(&'a self, schema: &Schema, position: usize) -> Option<&'a [u8]> {
+        let (r#type, offset) = schema.get_physical_attrs(position);
+        self.get_bytes_by_physical_attrs(r#type, position, offset)
+    }
 
-        let i = pos / 8;
-        let bit = pos % 8;
+    /// Gets the value of the ith column of the schema. Note that the nullability of the column in
+    /// the schema is ignored, null is returned based on the tuples null bitmap only.
+    pub fn get_by_physical_attrs<'a>(
+        &'a self,
+        r#type: Type,
+        position: usize,
+        offset: usize,
+    ) -> Value<'a> {
+        let Some(bytes) = self.get_bytes_by_physical_attrs(r#type, position, offset) else {
+            return Value::Null;
+        };
+
+        match r#type {
+            Type::String => Value::String(Cow::Borrowed(bytes)),
+            Type::Int8 => {
+                let value = i8::from_be_bytes(bytes.try_into().unwrap());
+                Value::Int8(value)
+            }
+            Type::Int32 => {
+                let value = i32::from_be_bytes(bytes.try_into().unwrap());
+                Value::Int32(value)
+            }
+            Type::Float32 => {
+                let value = f32::from_be_bytes(bytes.try_into().unwrap());
+                Value::Float32(value)
+            }
+        }
+    }
+
+    pub fn get_bytes_by_physical_attrs<'a>(
+        &'a self,
+        r#type: Type,
+        position: usize,
+        offset: usize,
+    ) -> Option<&'a [u8]> {
+        let i = position / 8;
+        let bit = position % 8;
         if self.nulls[i] & (1 << bit) > 0 {
             return None;
         }

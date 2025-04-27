@@ -1,5 +1,3 @@
-use crate::value::Value;
-
 #[derive(Clone, Copy)]
 pub enum ArithmeticOperator {
     Add,
@@ -41,8 +39,7 @@ pub enum Ident {
     QualifiedColumn { table: String, name: String },
 }
 
-#[allow(unused)]
-enum Literal {
+pub enum Literal {
     Number(String),
     Decimal(String),
     String(String),
@@ -50,10 +47,34 @@ enum Literal {
     Null,
 }
 
+impl<'a> From<i8> for Literal {
+    fn from(val: i8) -> Self {
+        Literal::Number(val.to_string())
+    }
+}
+
+impl<'a> From<i32> for Literal {
+    fn from(val: i32) -> Self {
+        Literal::Number(val.to_string())
+    }
+}
+
+impl<'a> From<f32> for Literal {
+    fn from(val: f32) -> Self {
+        Literal::Decimal(val.to_string())
+    }
+}
+
+impl<'a> From<&str> for Literal {
+    fn from(val: &str) -> Self {
+        Literal::String(val.to_string())
+    }
+}
+
 pub enum Expr {
     Ident(Ident),
     Function(Function),
-    Literal(Value<'static>),
+    Literal(Literal),
     IsNull {
         expr: Box<Expr>,
         negated: bool,
@@ -90,12 +111,12 @@ pub fn ident(value: &str) -> Expr {
     }
 }
 
-pub fn lit(value: impl Into<Value<'static>>) -> Expr {
+pub fn lit(value: impl Into<Literal>) -> Expr {
     Expr::Literal(value.into())
 }
 
 pub fn null() -> Expr {
-    Expr::Literal(Value::Null)
+    Expr::Literal(Literal::Null)
 }
 
 pub fn concat(args: Vec<Expr>) -> Expr {

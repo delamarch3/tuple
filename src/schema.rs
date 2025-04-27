@@ -32,6 +32,10 @@ impl Column {
         self.position
     }
 
+    pub fn physical_attrs(&self) -> (Type, usize, usize) {
+        (self.r#type, self.position, self.offset)
+    }
+
     pub fn nullable(&self) -> bool {
         self.nullable
     }

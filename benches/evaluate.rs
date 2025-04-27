@@ -4,6 +4,7 @@ use std::hint::black_box;
 use criterion::{criterion_group, criterion_main, Criterion};
 use tuple::evaluate::evaluate;
 use tuple::expr::{concat, contains, ident, lit};
+use tuple::physical_expr::PhysicalExpr;
 use tuple::schema::{Schema, Type};
 use tuple::tuple::Tuple;
 
@@ -36,37 +37,41 @@ fn evaluate_benchmark(c: &mut Criterion) {
         .add(lit(5))
         .lt(lit(25))
         .and(ident("retailprice").gt(lit(1499.5)));
+    let expr = PhysicalExpr::new(expr, &schema);
     c.bench_function("math (size + 5 < 25 and retailprice > 1499.5)", |b| {
         b.iter(|| {
             black_box(tuples.iter().for_each(|tuple| {
-                evaluate(&tuple, &schema, &expr);
+                evaluate(&tuple, &expr);
             }))
         });
     });
 
     let expr = ident("mfgr").eq(lit("Manufacturer#1"));
+    let expr = PhysicalExpr::new(expr, &schema);
     c.bench_function("select 1/5 (mfgr == Manufacturer#1)", |b| {
         b.iter(|| {
             black_box(tuples.iter().for_each(|tuple| {
-                evaluate(&tuple, &schema, &expr);
+                evaluate(&tuple, &expr);
             }))
         })
     });
 
     let expr = ident("brand").eq(lit("Brand#44"));
+    let expr = PhysicalExpr::new(expr, &schema);
     c.bench_function("select 1/25 (brand == Brand#44)", |b| {
         b.iter(|| {
             black_box(tuples.iter().for_each(|tuple| {
-                evaluate(&tuple, &schema, &expr);
+                evaluate(&tuple, &expr);
             }))
         })
     });
 
     let expr = ident("container").eq(lit("WRAP CAN"));
+    let expr = PhysicalExpr::new(expr, &schema);
     c.bench_function("select 1/40 (container == WRAP CAN)", |b| {
         b.iter(|| {
             black_box(tuples.iter().for_each(|tuple| {
-                evaluate(&tuple, &schema, &expr);
+                evaluate(&tuple, &expr);
             }))
         })
     });
@@ -75,12 +80,13 @@ fn evaluate_benchmark(c: &mut Criterion) {
         concat(vec![ident("container"), ident("container")]),
         lit("CANWRAP"),
     ]);
+    let expr = PhysicalExpr::new(expr, &schema);
     c.bench_function(
         "string functions (contains(concat(container, container), CANWRAP)",
         |b| {
             b.iter(|| {
                 black_box(tuples.iter().for_each(|tuple| {
-                    evaluate(&tuple, &schema, &expr);
+                    evaluate(&tuple, &expr);
                 }))
             })
         },
