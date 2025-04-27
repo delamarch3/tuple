@@ -83,6 +83,7 @@ impl Tuple {
 
     /// Gets the value of the ith column of the schema. Note that the nullability of the column in
     /// the schema is ignored, null is returned based on the tuples null bitmap only.
+    #[inline]
     pub fn get_by_physical_attrs<'a>(
         &'a self,
         r#type: Type,
@@ -110,6 +111,7 @@ impl Tuple {
         }
     }
 
+    #[inline]
     pub fn get_bytes_by_physical_attrs<'a>(
         &'a self,
         r#type: Type,
