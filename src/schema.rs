@@ -124,9 +124,11 @@ impl Schema {
         let size = self.size;
 
         for (table, name) in identifiers {
-            // This currently returns None if the table/column doesn't exist, but it might make
-            // sense to continue instead.
-            let column = self.find_qualified_column(table, name).cloned()?;
+            let column = match table {
+                Some(table) => self.find_qualified_column(table, name).cloned()?,
+                None => self.find_column(name).cloned()?,
+            };
+
             columns.push(column);
         }
 
@@ -162,16 +164,18 @@ impl Schema {
     }
 
     pub fn find_column(&self, name: &str) -> Option<&Column> {
-        self.find_qualified_column(None, name)
+        self.columns
+            .iter()
+            .find(|Column { name: n1, .. }| name == n1)
     }
 
-    pub fn find_qualified_column(&self, table: Option<&str>, name: &str) -> Option<&Column> {
+    pub fn find_qualified_column(&self, table: &str, name: &str) -> Option<&Column> {
         self.columns.iter().find(
             |Column {
                  table: t1,
                  name: n1,
                  ..
-             }| table == t1.as_deref() && name == n1,
+             }| Some(table) == t1.as_deref() && name == n1,
         )
     }
 }

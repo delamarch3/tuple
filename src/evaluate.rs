@@ -291,7 +291,7 @@ fn evaluate_ident<'a>(tuple: &'a Tuple, schema: &Schema, ident: &Ident) -> Value
     let position = match ident {
         Ident::Column(name) => schema.find_column(name).map(Column::position).unwrap(),
         Ident::QualifiedColumn { table, name } => schema
-            .find_qualified_column(Some(table), name)
+            .find_qualified_column(table, name)
             .map(Column::position)
             .unwrap(),
     };
