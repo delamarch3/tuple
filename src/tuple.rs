@@ -76,47 +76,11 @@ impl Tuple {
 
     /// Gets the bytes of the ith column of the schema. Note that the nullability of the column in
     /// the schema is ignored, null is returned based on the tuples null bitmap only.
-    pub fn get_bytes<'a>(&'a self, schema: &Schema, position: usize) -> Option<&'a [u8]> {
-        let attrs = schema.get_physical_attrs(position);
-        self.get_bytes_by_physical_attrs(attrs)
-    }
+    fn get_bytes<'a>(&'a self, schema: &Schema, position: usize) -> Option<&'a [u8]> {
+        let PhysicalAttrs { r#type, offset, .. } = schema.get_physical_attrs(position);
 
-    /// Gets the value of the ith column of the schema. Note that the nullability of the column in
-    /// the schema is ignored, null is returned based on the tuples null bitmap only.
-    #[inline]
-    pub fn get_by_physical_attrs<'a>(&'a self, attrs: PhysicalAttrs) -> Value<'a> {
-        let Some(bytes) = self.get_bytes_by_physical_attrs(attrs) else {
-            return Value::Null;
-        };
-
-        match attrs.r#type {
-            Type::String => Value::String(Cow::Borrowed(bytes)),
-            Type::Int8 => {
-                let value = i8::from_be_bytes(bytes.try_into().unwrap());
-                Value::Int8(value)
-            }
-            Type::Int32 => {
-                let value = i32::from_be_bytes(bytes.try_into().unwrap());
-                Value::Int32(value)
-            }
-            Type::Float32 => {
-                let value = f32::from_be_bytes(bytes.try_into().unwrap());
-                Value::Float32(value)
-            }
-        }
-    }
-
-    #[inline]
-    pub fn get_bytes_by_physical_attrs<'a>(
-        &'a self,
-        PhysicalAttrs {
-            r#type,
-            position,
-            offset,
-        }: PhysicalAttrs,
-    ) -> Option<&'a [u8]> {
-        let i = position / 8;
-        let bit = position % 8;
+        let i = position / 64;
+        let bit = position % 64;
         if self.nulls[i] & (1 << bit) > 0 {
             return None;
         }
@@ -131,6 +95,59 @@ impl Tuple {
                 Some(&self.data[offset..offset + length])
             }
             _ => Some(&self.data[offset..offset + r#type.size()]),
+        }
+    }
+
+    /// Gets the value of the ith column of the schema. Note that the nullability of the column in
+    /// the schema is ignored, null is returned based on the tuples null bitmap only.
+    #[inline]
+    pub fn get_by_physical_attrs<'a>(
+        &'a self,
+        PhysicalAttrs {
+            r#type,
+            position,
+            offset,
+        }: PhysicalAttrs,
+    ) -> Value<'a> {
+        let i = position / 8;
+        let bit = position % 8;
+        if self.nulls[i] & (1 << bit) > 0 {
+            return Value::Null;
+        }
+
+        match r#type {
+            Type::String => {
+                let length =
+                    u16::from_be_bytes(self.data[offset + 2..offset + 4].try_into().unwrap())
+                        as usize;
+                let offset =
+                    u16::from_be_bytes(self.data[offset..offset + 2].try_into().unwrap()) as usize;
+                Value::String(Cow::Borrowed(&self.data[offset..offset + length]))
+            }
+            Type::Int8 => {
+                let value = i8::from_be_bytes(
+                    self.data[offset..offset + r#type.size()]
+                        .try_into()
+                        .unwrap(),
+                );
+                Value::Int8(value)
+            }
+            Type::Int32 => {
+                let value = i32::from_be_bytes(
+                    self.data[offset..offset + r#type.size()]
+                        .try_into()
+                        .unwrap(),
+                );
+                Value::Int32(value)
+            }
+            Type::Float32 => {
+                let value = f32::from_be_bytes(
+                    self.data[offset..offset + r#type.size()]
+                        .try_into()
+                        .unwrap(),
+                );
+                Value::Float32(value)
+            }
         }
     }
 
