@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 #[derive(Clone, Copy)]
 pub enum ArithmeticOperator {
     Add,
@@ -39,42 +41,48 @@ pub enum Ident {
     QualifiedColumn { table: String, name: String },
 }
 
-pub enum Literal {
+pub enum Literal<'a> {
     Number(String),
     Decimal(String),
-    String(String),
+    String(Cow<'a, [u8]>),
     Bool(bool),
     Null,
 }
 
-impl<'a> From<i8> for Literal {
+impl<'a> From<i8> for Literal<'a> {
     fn from(val: i8) -> Self {
         Literal::Number(val.to_string())
     }
 }
 
-impl<'a> From<i32> for Literal {
+impl<'a> From<i32> for Literal<'a> {
     fn from(val: i32) -> Self {
         Literal::Number(val.to_string())
     }
 }
 
-impl<'a> From<f32> for Literal {
+impl<'a> From<f32> for Literal<'a> {
     fn from(val: f32) -> Self {
         Literal::Decimal(val.to_string())
     }
 }
 
-impl<'a> From<&str> for Literal {
-    fn from(val: &str) -> Self {
-        Literal::String(val.to_string())
+impl<'a> From<&'a str> for Literal<'a> {
+    fn from(val: &'a str) -> Self {
+        Literal::String(Cow::Borrowed(val.as_bytes()))
+    }
+}
+
+impl<'a> From<String> for Literal<'a> {
+    fn from(val: String) -> Self {
+        Literal::String(Cow::Owned(val.into_bytes()))
     }
 }
 
 pub enum Expr {
     Ident(Ident),
     Function(Function),
-    Literal(Literal),
+    Literal(Literal<'static>),
     IsNull {
         expr: Box<Expr>,
         negated: bool,
@@ -111,7 +119,7 @@ pub fn ident(value: &str) -> Expr {
     }
 }
 
-pub fn lit(value: impl Into<Literal>) -> Expr {
+pub fn lit(value: impl Into<Literal<'static>>) -> Expr {
     Expr::Literal(value.into())
 }
 

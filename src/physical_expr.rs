@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use crate::evaluate::{concat, contains};
 use crate::expr::{
     ArithmeticOperator as ExprArithmeticOperator, ComparisonOperator as ExprComparisonOperator,
@@ -46,7 +44,7 @@ pub type Function = for<'a> fn(tuple: &'a Tuple, args: &Vec<PhysicalExpr>) -> Va
 pub enum PhysicalExpr {
     Ident(PhysicalAttrs),
     Function(Function, Vec<PhysicalExpr>),
-    Value(Value<'static>),
+    Value(Value<'static>), // TODO: in base we will need to tie it to the lifetime of the literal
     IsNull {
         expr: Box<PhysicalExpr>,
         negated: bool,
@@ -120,12 +118,12 @@ fn physical_function(function: ExprFunction, schema: &Schema) -> PhysicalExpr {
     }
 }
 
-fn physical_value(literal: ExprLiteral) -> PhysicalExpr {
+fn physical_value(literal: ExprLiteral<'static>) -> PhysicalExpr {
     // TODO: coerce if required
     let value = match literal {
         ExprLiteral::Number(number) => Value::Int32(number.parse().unwrap()),
         ExprLiteral::Decimal(decimal) => Value::Float32(decimal.parse().unwrap()),
-        ExprLiteral::String(string) => Value::String(Cow::Owned(string.into_bytes())),
+        ExprLiteral::String(string) => Value::String(string),
         ExprLiteral::Bool(bool) => Value::Int8(bool as i8),
         ExprLiteral::Null => Value::Null,
     };
