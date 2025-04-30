@@ -156,51 +156,11 @@ impl Tuple {
         Ok(())
     }
 
-    pub fn from_bytes(mut bytes: &[u8]) -> Tuple {
-        let types_size = bytes[0] as usize;
-        bytes = &bytes[1..];
-        let types = &bytes[0..types_size];
-        // Safety: `u8` is `Type`
-        let types =
-            unsafe { std::slice::from_raw_parts(types.as_ptr() as *const Type, types.len()) }
-                .to_vec();
-        let offsets: Vec<_> = types
-            .iter()
-            .scan(0, |state, r#type| {
-                let offset = *state;
-                *state += r#type.size();
-                Some(offset)
-            })
-            .collect();
-
-        let data_size = types.iter().fold(0, |acc, x| acc + x.size());
-        let data = &bytes[types_size..types_size + data_size];
-
-        let strings_size = types
-            .iter()
-            .enumerate()
-            .filter(|(_, r#type)| matches!(r#type, Type::String))
-            .map(|(position, _)| offsets[position])
-            .fold(0, |acc, offset| {
-                let length =
-                    u16::from_be_bytes(data[offset + 2..offset + 4].try_into().unwrap()) as usize;
-                acc + length
-            });
-
-        let data = BytesMut::from(&bytes[types_size..types_size + data_size + strings_size]);
-
-        Self {
-            types,
-            offsets,
-            data,
-        }
-    }
-
     pub fn read_from(r: &mut impl Read) -> io::Result<Tuple> {
-        let mut types_size = [0; 1];
-        r.read_exact(&mut types_size)?;
+        let mut types_size = 0;
+        r.read_exact(std::slice::from_mut(&mut types_size))?;
 
-        let mut types = vec![0; types_size[0].into()];
+        let mut types = vec![0; types_size as usize];
         r.read_exact(&mut types)?;
         // Safety: `u8` is `Type`
         let types =
@@ -360,7 +320,7 @@ impl TupleBuilder {
 mod test {
     use std::borrow::Cow;
     use std::cmp::Ordering::*;
-    use std::io::{Cursor, Read};
+    use std::io::Cursor;
 
     use super::{Tuple, TupleBuilder};
     use crate::schema::{Schema, Type};
@@ -510,14 +470,6 @@ mod test {
         c.set_position(0);
         tuples.iter().for_each(|want| {
             let have = Tuple::read_from(&mut c).unwrap();
-            assert_eq!(want.cmp(&have), Equal);
-        });
-
-        c.set_position(0);
-        tuples.iter().for_each(|want| {
-            let mut buf = vec![0; want.size()];
-            c.read_exact(&mut buf).unwrap();
-            let have = Tuple::from_bytes(&buf);
             assert_eq!(want.cmp(&have), Equal);
         });
 
