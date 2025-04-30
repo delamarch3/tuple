@@ -18,7 +18,7 @@ use crate::value::Value;
 /// The length of the columns is represented as the first byte in the tuple. Consequently, there is
 /// a column limit of 255. The types are also encoded as bytes. The types are iterated over to
 /// determine the offsets for each of the values.
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq)]
 pub struct Tuple {
     types: Vec<Type>,
     offsets: Vec<usize>,
@@ -35,6 +35,30 @@ impl std::fmt::Debug for Tuple {
                 write!(f, "{:?}", value)?;
                 Ok(sep = "|")
             })
+    }
+}
+
+impl PartialOrd for Tuple {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Tuple {
+    fn cmp(&self, other: &Self) -> Ordering {
+        debug_assert_eq!(self.types.len(), other.types.len());
+
+        for position in 0..self.types.len() {
+            let lhs = self.get(position);
+            let rhs = other.get(position);
+
+            match lhs.cmp(&rhs) {
+                ord @ (Ordering::Less | Ordering::Greater) => return ord,
+                Ordering::Equal => continue,
+            }
+        }
+
+        Ordering::Equal
     }
 }
 
@@ -122,26 +146,6 @@ impl Tuple {
                 b.add(self.get(position))
             })
             .finish()
-    }
-
-    /// Compares `self` and `other` by iterating and comparing each column of the tuple.
-    /// TODO: implement [`PartialOrd`] now that schema is not required
-    pub fn cmp(&self, other: &Tuple) -> Ordering {
-        use Ordering::*;
-
-        debug_assert_eq!(self.types.len(), other.types.len());
-
-        for position in 0..self.types.len() {
-            let lhs = self.get(position);
-            let rhs = other.get(position);
-
-            match lhs.cmp(&rhs) {
-                ord @ Less | ord @ Greater => return ord,
-                Equal => continue,
-            }
-        }
-
-        Equal
     }
 
     pub fn write_to(&self, w: &mut impl Write) -> io::Result<()> {
