@@ -22,7 +22,7 @@ fn evaluate_benchmark(c: &mut Criterion) {
         .add_column("comment".into(), Type::String, nullable);
 
     let mut r = File::open("part.tpls").expect("error opening part.tpls");
-    let tuples = std::iter::from_fn(|| match Tuple::read_from(&mut r, &schema) {
+    let tuples = std::iter::from_fn(|| match Tuple::read_from(&mut r) {
         Ok(tuple) => Some(Ok(tuple)),
         Err(err) => match err.kind() {
             std::io::ErrorKind::UnexpectedEof => None,

@@ -48,10 +48,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_column("comment".into(), Type::String, nullable);
 
     while let Some((line_number, result)) = lines.next() {
-        let mut tuple = TupleBuilder::new(&schema);
         let line = result?;
+
+        let mut tuple = TupleBuilder::new();
         let mut values = line.split('|');
-        let mut types = schema.physical_attrs().map(|attr| attr.r#type);
+        let mut types = schema.types();
         while let Some(r#type) = types.next() {
             let Some(value) = values.next() else {
                 eprintln!("unexpected end of row values on line {line_number}");
@@ -63,6 +64,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Type::Int8 => tuple.int8(value.parse()?),
                 Type::Int32 => tuple.int32(value.parse()?),
                 Type::Float32 => tuple.float32(value.parse()?),
+                Type::Null => tuple,
             }
         }
 

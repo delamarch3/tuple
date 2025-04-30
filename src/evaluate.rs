@@ -6,7 +6,7 @@ use crate::value::Value;
 
 pub fn evaluate<'a>(tuple: &'a Tuple, expr: &Expr) -> Value<'a> {
     match expr {
-        Expr::Ident(attrs) => tuple.get_by_physical_attrs(*attrs),
+        Expr::Ident(position) => tuple.get(*position),
         Expr::Function(evaluate_function, args) => evaluate_function(tuple, args),
         Expr::Value(value) => value.clone(),
         Expr::IsNull { expr, negated } => evaluate_is_null(tuple, expr, *negated),
@@ -164,7 +164,7 @@ mod test {
     #[test]
     fn test_constant_expressions() {
         let schema = Schema::default();
-        let tuple = TupleBuilder::new(&schema).finish();
+        let tuple = TupleBuilder::new().finish();
 
         [
             (lit(1 as i32).add(lit(2 as i32)), Value::Int32(3)),
@@ -193,7 +193,7 @@ mod test {
             .add_qualified_column(Some("t1".into()), "c2".into(), Type::String, nullable)
             .add_column("c3".into(), Type::Float32, nullable)
             .add_qualified_column(Some("t1".into()), "c4".into(), Type::Int32, nullable);
-        let tuple = TupleBuilder::new(&schema)
+        let tuple = TupleBuilder::new()
             .null()
             .string(b"a")
             .float32(7.2)

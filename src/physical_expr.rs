@@ -4,7 +4,7 @@ use crate::expr::{
     Expr, Function as ExprFunction, Ident as ExprIdent, Literal as ExprLiteral,
     LogicalOperator as ExprLogicalOperator, Operator as ExprOperator,
 };
-use crate::schema::{Column, PhysicalAttrs, Schema};
+use crate::schema::{Column, Schema};
 use crate::tuple::Tuple;
 use crate::value::Value;
 
@@ -42,7 +42,7 @@ pub enum Operator {
 pub type Function = for<'a> fn(tuple: &'a Tuple, args: &Vec<PhysicalExpr>) -> Value<'a>;
 
 pub enum PhysicalExpr {
-    Ident(PhysicalAttrs),
+    Ident(usize),
     Function(Function, Vec<PhysicalExpr>),
     Value(Value<'static>), // TODO: in base we will need to tie it to the lifetime of the literal
     IsNull {
@@ -91,18 +91,15 @@ impl PhysicalExpr {
 }
 
 fn physical_ident(ident: ExprIdent, schema: &Schema) -> PhysicalExpr {
-    let attrs = match ident {
-        ExprIdent::Column(name) => schema
-            .find_column(&name)
-            .map(Column::physical_attrs)
-            .unwrap(),
+    let position = match ident {
+        ExprIdent::Column(name) => schema.find_column(&name).map(Column::position).unwrap(),
         ExprIdent::QualifiedColumn { table, name } => schema
             .find_qualified_column(&table, &name)
-            .map(Column::physical_attrs)
+            .map(Column::position)
             .unwrap(),
     };
 
-    PhysicalExpr::Ident(attrs)
+    PhysicalExpr::Ident(position)
 }
 
 fn physical_function(function: ExprFunction, schema: &Schema) -> PhysicalExpr {

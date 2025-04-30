@@ -1,5 +1,7 @@
 #[derive(Clone, Copy, PartialEq, Debug)]
+#[repr(u8)]
 pub enum Type {
+    Null = 0,
     String,
     Int8,
     Int32,
@@ -9,11 +11,53 @@ pub enum Type {
 impl Type {
     pub fn size(&self) -> usize {
         match self {
+            Type::Null => 0,
             Type::String => 4,
             Type::Int8 => 1,
             Type::Int32 => 4,
             Type::Float32 => 4,
         }
+    }
+}
+
+pub struct StringOffsetIter<'a, T>
+where
+    T: Iterator<Item = &'a Type>,
+{
+    types: T,
+    offset: usize,
+}
+
+impl<'a, T> Iterator for StringOffsetIter<'a, T>
+where
+    T: Iterator<Item = &'a Type>,
+{
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let r#type = self.types.next()?;
+            match r#type {
+                Type::String => {
+                    let offset = self.offset;
+                    self.offset += r#type.size();
+                    break Some(offset);
+                }
+                _ => {
+                    self.offset += r#type.size();
+                    continue;
+                }
+            }
+        }
+    }
+}
+
+impl<'a, T> StringOffsetIter<'a, T>
+where
+    T: Iterator<Item = &'a Type>,
+{
+    pub fn new(types: T) -> Self {
+        Self { types, offset: 0 }
     }
 }
 
@@ -35,6 +79,10 @@ pub struct PhysicalAttrs {
 }
 
 impl Column {
+    pub fn r#type(&self) -> Type {
+        self.r#type
+    }
+
     pub fn position(&self) -> usize {
         self.position
     }
@@ -59,12 +107,12 @@ pub struct Schema {
 }
 
 impl Schema {
-    pub fn columns(&self) -> &Vec<Column> {
-        &self.columns
+    pub fn types(&self) -> impl Iterator<Item = Type> + use<'_> {
+        self.columns.iter().map(Column::r#type)
     }
 
-    pub fn physical_attrs(&self) -> impl Iterator<Item = PhysicalAttrs> + use<'_> {
-        self.columns.iter().map(Column::physical_attrs)
+    pub fn positions(&self) -> impl Iterator<Item = usize> + use<'_> {
+        self.columns.iter().map(Column::position)
     }
 
     pub fn len(&self) -> usize {
@@ -77,25 +125,6 @@ impl Schema {
 
     pub fn size(&self) -> usize {
         self.size
-    }
-
-    pub fn nulls_size(&self) -> usize {
-        (self.columns.len() / 8) + 1
-    }
-
-    pub fn get_type(&self, i: usize) -> Type {
-        self.columns[i].r#type
-    }
-
-    pub fn get_physical_attrs(&self, i: usize) -> PhysicalAttrs {
-        self.columns[i].physical_attrs()
-    }
-
-    pub fn string_pointer_offsets(&self) -> impl Iterator<Item = usize> + use<'_> {
-        self.columns
-            .iter()
-            .filter(|Column { r#type, .. }| r#type == &Type::String)
-            .map(|Column { offset, .. }| *offset)
     }
 
     pub fn add_column(self, name: String, r#type: Type, nullable: bool) -> Self {

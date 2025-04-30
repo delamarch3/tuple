@@ -1,13 +1,28 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum Value<'a> {
     String(Cow<'a, [u8]>),
     Int8(i8),
     Int32(i32),
     Float32(f32),
     Null,
+}
+
+impl<'a> std::fmt::Debug for Value<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::String(value) => match std::str::from_utf8(value) {
+                Ok(s) => write!(f, "String({s})"),
+                Err(_) => write!(f, "String({:?})", value),
+            },
+            Value::Int8(value) => write!(f, "Int8({value})"),
+            Value::Int32(value) => write!(f, "Int32({value})"),
+            Value::Float32(value) => write!(f, "Float32({value})"),
+            Value::Null => write!(f, "Null"),
+        }
+    }
 }
 
 impl<'a> Eq for Value<'a> {}

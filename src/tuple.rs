@@ -4,39 +4,43 @@ use std::io::{self, Read, Write};
 
 use bytes::{BufMut, BytesMut};
 
-use crate::schema::{PhysicalAttrs, Schema, Type};
+use crate::schema::{StringOffsetIter, Type};
 use crate::value::Value;
 
 /// The layout of the tuple is:
-/// variable null bitmap | data (eg int, float, string pointer) | variable section
+/// u8 length | [u8] types | \[Value] data | [u8] variable section
 ///
-/// In the data section, a string is represented as a fat pointer to the variable length section, eg
-/// 2 byte offset, 2 byte length. When a tuple is being constructed, the strings are collected
+/// In the data section, a string is represented as a fat pointer to the variable length section (a
+/// 16bit offset and 16bit length). When a tuple is being constructed, the strings are collected
 /// separately instead of being directly appended to the tuple because their offsets will only be
 /// known once the variable length section is appended.
 ///
-/// The size of the null bitmap is determined by the number of columns in the schema. Each section
-/// of the bitmap will be a u8. So if there are 65 columns, the size of the null bitmap will be
-/// 72 bits (9 bytes). For simplicity the null section will exist even if there are no nullable columns in the
-/// schema, unless the schema is empty, in that case the null section is also empty.
-/// Also for simplicity, the size of the null value will still be appended to the data
-/// section, which will ease reading the tuple, since the offsets of all values update once a null
-/// is introduced.
-/// TODO: consider encoding the typeids in the tuple - do not need to hold offsets in the schema
-/// and can store null easily. Then get value would look like: check types len, iterate until pos
-/// while keeping track of the offset. if typeid = 0 return null, else read offset and use type
-/// size. We can build the typeid list once in the schema and assert after build that they match.
-/// For [`fit_tuple_with_schema()`], we could use the indices of the columns instead of offsets from
-/// schema.
-#[derive(Debug, PartialEq)]
+/// The length of the columns is represented as the first byte in the tuple. Consequently, there is
+/// a column limit of 255. The types are also encoded as bytes. The types are iterated over to
+/// determine the offsets for each of the values.
+#[derive(PartialEq)]
 pub struct Tuple {
-    nulls: Vec<u8>,
+    types: Vec<Type>,
     data: BytesMut,
 }
 
+impl std::fmt::Debug for Tuple {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut sep = "";
+        (0..self.types.len())
+            .map(|position| self.get(position))
+            .try_for_each(|value| {
+                write!(f, "{sep}")?;
+                write!(f, "{:?}", value)?;
+                Ok(sep = "|")
+            })
+    }
+}
+
 impl Tuple {
-    pub fn null_bytes(&self) -> &[u8] {
-        self.nulls.as_slice()
+    pub fn type_bytes(&self) -> &[u8] {
+        // Safety: `Type` is `u8`
+        unsafe { std::slice::from_raw_parts(self.types.as_ptr() as *const u8, self.types.len()) }
     }
 
     pub fn data_bytes(&self) -> &[u8] {
@@ -44,27 +48,18 @@ impl Tuple {
     }
 
     pub fn size(&self) -> usize {
-        self.null_bytes().len() + self.data_bytes().len()
+        1 + self.types.len() + self.data.len()
     }
 
-    /// Gets the value of the ith column of the schema. Note that the nullability of the column in
-    /// the schema is ignored, null is returned based on the tuples null bitmap only.
-    #[inline]
-    pub fn get_by_physical_attrs<'a>(
-        &'a self,
-        PhysicalAttrs {
-            r#type,
-            position,
-            offset,
-        }: PhysicalAttrs,
-    ) -> Value<'a> {
-        let i = position / 8;
-        let bit = position % 8;
-        if self.nulls[i] & (1 << bit) > 0 {
-            return Value::Null;
-        }
+    /// Gets the value of the ith column of the tuple.
+    pub fn get<'a>(&'a self, position: usize) -> Value<'a> {
+        let r#type = self.types[position];
+        let offset = self.types[..position]
+            .iter()
+            .fold(0, |acc, x| acc + x.size());
 
         match r#type {
+            Type::Null => Value::Null,
             Type::String => {
                 let length =
                     u16::from_be_bytes(self.data[offset + 2..offset + 4].try_into().unwrap())
@@ -101,10 +96,9 @@ impl Tuple {
     }
 
     /// Creates a new tuple which is greater than the current one by the first value.
-    pub fn next(&self, schema: &Schema) -> Self {
+    pub fn next(&self) -> Self {
         // TODO: handle overflow
-        let attrs = schema.get_physical_attrs(0);
-        let first = match self.get_by_physical_attrs(attrs) {
+        let first = match self.get(0) {
             Value::String(value) if value.is_empty() => Value::String(Cow::Owned(vec![0])),
             Value::String(mut value) => 'string: {
                 for b in value.to_mut().iter_mut() {
@@ -120,24 +114,26 @@ impl Tuple {
             Value::Int8(value) => Value::Int8(value + 1),
             Value::Int32(value) => Value::Int32(value + 1),
             Value::Float32(value) => Value::Float32(value + f32::EPSILON),
-            Value::Null => todo!(), // This would need to turn into a non-null value by consulting the schema
+            Value::Null => unimplemented!("creating a next tuple for one with null columns"),
         };
 
-        (1..schema.len())
-            .map(|i| schema.get_physical_attrs(i))
-            .fold(TupleBuilder::new(schema).add(first), |b, attrs| {
-                b.add(self.get_by_physical_attrs(attrs))
+        (1..self.types.len())
+            .fold(TupleBuilder::new().add(first), |b, position| {
+                b.add(self.get(position))
             })
             .finish()
     }
 
     /// Compares `self` and `other` by iterating and comparing each column of the tuple.
-    pub fn cmp(&self, other: &Tuple, schema: &Schema) -> Ordering {
+    /// TODO: implement [`PartialOrd`] now that schema is not required
+    pub fn cmp(&self, other: &Tuple) -> Ordering {
         use Ordering::*;
 
-        for attrs in schema.physical_attrs() {
-            let lhs = self.get_by_physical_attrs(attrs);
-            let rhs = other.get_by_physical_attrs(attrs);
+        debug_assert_eq!(self.types.len(), other.types.len());
+
+        for position in 0..self.types.len() {
+            let lhs = self.get(position);
+            let rhs = other.get(position);
 
             match lhs.cmp(&rhs) {
                 ord @ Less | ord @ Greater => return ord,
@@ -149,61 +145,73 @@ impl Tuple {
     }
 
     pub fn write_to(&self, w: &mut impl Write) -> io::Result<()> {
-        w.write_all(self.null_bytes())?;
+        w.write_all(std::slice::from_ref(&(self.types.len() as u8)))?;
+        w.write_all(self.type_bytes())?;
         w.write_all(self.data_bytes())?;
 
         Ok(())
     }
 
-    pub fn from_bytes(bytes: &[u8], schema: &Schema) -> Tuple {
-        let nulls_size = schema.nulls_size();
-        let data_size = schema.size();
+    pub fn from_bytes(mut bytes: &[u8]) -> Tuple {
+        let types_size = bytes[0] as usize;
+        bytes = &bytes[1..];
+        let types = &bytes[0..types_size];
+        // Safety: `u8` is `Type`
+        let types =
+            unsafe { std::slice::from_raw_parts(types.as_ptr() as *const Type, types.len()) }
+                .to_vec();
 
-        let nulls = bytes[0..nulls_size].to_vec();
-        let data = &bytes[nulls_size..nulls_size + data_size];
-        let strings_size = schema.string_pointer_offsets().fold(0, |acc, offset| {
-            let length = u16::from_be_bytes(data[offset + 2..offset + 4].try_into().unwrap());
+        let data_size = types.iter().fold(0, |acc, x| acc + x.size());
+        let data = &bytes[types_size..types_size + data_size];
+
+        let strings_size = StringOffsetIter::new(types.iter()).fold(0, |acc, offset| {
+            let length =
+                u16::from_be_bytes(data[offset + 2..offset + 4].try_into().unwrap()) as usize;
             acc + length
-        }) as usize;
-        let data = BytesMut::from(&bytes[nulls_size..nulls_size + data_size + strings_size]);
+        });
 
-        Self { nulls, data }
+        let data = BytesMut::from(&bytes[types_size..types_size + data_size + strings_size]);
+
+        Self { types, data }
     }
 
-    pub fn read_from(r: &mut impl Read, schema: &Schema) -> io::Result<Tuple> {
-        let nulls_size = schema.nulls_size();
-        let data_size = schema.size();
+    pub fn read_from(r: &mut impl Read) -> io::Result<Tuple> {
+        let mut types_size = [0; 1];
+        r.read_exact(&mut types_size)?;
 
-        let mut nulls = vec![0; nulls_size];
-        r.read_exact(&mut nulls)?;
+        let mut types = vec![0; types_size[0].into()];
+        r.read_exact(&mut types)?;
+        // Safety: `u8` is `Type`
+        let types =
+            unsafe { std::slice::from_raw_parts(types.as_ptr() as *const Type, types.len()) }
+                .to_vec();
 
+        let data_size = types.iter().fold(0, |acc, x| acc + x.size());
         let mut data = BytesMut::zeroed(data_size);
         r.read_exact(&mut data)?;
 
-        let strings_size = schema.string_pointer_offsets().fold(0, |acc, offset| {
-            let length = u16::from_be_bytes(data[offset + 2..offset + 4].try_into().unwrap());
+        let strings_size = StringOffsetIter::new(types.iter()).fold(0, |acc, offset| {
+            let length =
+                u16::from_be_bytes(data[offset + 2..offset + 4].try_into().unwrap()) as usize;
             acc + length
-        }) as usize;
+        });
 
         let mut strings = vec![0; strings_size];
         r.read_exact(&mut strings)?;
 
         data.extend(strings);
 
-        Ok(Self { nulls, data })
+        Ok(Self { types, data })
     }
 }
 
 /// Creates a new tuple using only the columns in the schema. The schema offsets are expected to
 /// align with the offsets in the tuple. This is useful for creating composite key tuple out of
 /// non-contiguous columns.
-pub fn fit_tuple_with_schema(tuple: &Tuple, schema: &Schema) -> Tuple {
-    // TODO: Probably do not need to pass the entire schema to the tuple builder
-    let mut compact_schema = schema.clone();
-    compact_schema.compact();
-    let mut builder = TupleBuilder::new(&compact_schema);
-    for attrs in schema.physical_attrs() {
-        let value = tuple.get_by_physical_attrs(attrs);
+pub fn fit_tuple_with_schema(tuple: &Tuple, positions: impl Iterator<Item = usize>) -> Tuple {
+    let mut builder = TupleBuilder::new();
+    for position in positions {
+        let value = tuple.get(position);
         builder = builder.add(value);
     }
 
@@ -216,33 +224,19 @@ struct Variable {
     pointer_offset: usize,
 }
 
-pub struct TupleBuilder<'a> {
-    schema: &'a Schema,
+pub struct TupleBuilder {
+    types: Vec<Type>,
     data: BytesMut,
     vars: Vec<Variable>,
-    nulls: Vec<u8>,
-    position: usize,
 }
 
-impl<'a> TupleBuilder<'a> {
-    pub fn new(schema: &'a Schema) -> Self {
-        let nulls_len = schema.nulls_size();
-        let data_size = schema.size();
-
-        let mut nulls = Vec::new();
-        (0..nulls_len).for_each(|_| nulls.push(0));
-
-        let data = BytesMut::with_capacity(data_size);
+impl TupleBuilder {
+    pub fn new() -> Self {
+        let types = Vec::new();
+        let data = BytesMut::new();
         let vars = Vec::new();
-        let position = 0;
 
-        Self {
-            schema,
-            data,
-            vars,
-            nulls,
-            position,
-        }
+        Self { types, data, vars }
     }
 
     #[allow(clippy::should_implement_trait)]
@@ -257,7 +251,7 @@ impl<'a> TupleBuilder<'a> {
     }
 
     pub fn string(mut self, value: &[u8]) -> Self {
-        self.position += 1;
+        self.types.push(Type::String);
 
         let pointer_offset = self.data.len();
         self.data.put_u16(0); // Offset
@@ -272,35 +266,26 @@ impl<'a> TupleBuilder<'a> {
     }
 
     pub fn int8(mut self, value: i8) -> Self {
-        self.position += 1;
+        self.types.push(Type::Int8);
         self.data.put_i8(value);
         self
     }
 
     pub fn int32(mut self, value: i32) -> Self {
-        self.position += 1;
+        self.types.push(Type::Int32);
         self.data.put_i32(value);
         self
     }
 
     pub fn float32(mut self, value: f32) -> Self {
-        self.position += 1;
+        self.types.push(Type::Float32);
         self.data.put_f32(value);
         self
     }
 
     pub fn null(mut self) -> Self {
-        let pos = self.position;
-        let i = pos / 8;
-        let bit = pos % 8;
-        self.nulls[i] |= 1 << bit;
-
-        match self.schema.get_type(pos) {
-            Type::String => self.string(b""),
-            Type::Int8 => self.int8(0),
-            Type::Int32 => self.int32(0),
-            Type::Float32 => self.float32(0.),
-        }
+        self.types.push(Type::Null);
+        self
     }
 
     pub fn finish(mut self) -> Tuple {
@@ -316,7 +301,7 @@ impl<'a> TupleBuilder<'a> {
         }
 
         Tuple {
-            nulls: self.nulls,
+            types: self.types,
             data: self.data,
         }
     }
@@ -341,7 +326,7 @@ mod test {
             .add_column("c3".into(), Type::Float32, nullable)
             .add_column("c4".into(), Type::Int32, nullable);
 
-        let tuple = TupleBuilder::new(&schema)
+        let tuple = TupleBuilder::new()
             .int8(32)
             .string(b"the quick brown fox jumps over the lazy dog")
             .null()
@@ -357,8 +342,8 @@ mod test {
             Int32(7),
         ]
         .into_iter()
-        .zip(schema.physical_attrs())
-        .for_each(|(want, attrs)| assert_eq!(tuple.get_by_physical_attrs(attrs), want));
+        .zip(schema.positions())
+        .for_each(|(want, position)| assert_eq!(tuple.get(position), want));
     }
 
     #[test]
@@ -371,26 +356,21 @@ mod test {
             .add_column("c4".into(), Type::Int32, nullable);
 
         [
-            TupleBuilder::new(&schema)
+            TupleBuilder::new()
                 .int8(32)
                 .string(b"the quick brown fox jumps over the lazy dog")
                 .null()
                 .int32(7)
                 .finish(),
-            TupleBuilder::new(&schema)
-                .null()
-                .null()
-                .null()
-                .null()
-                .finish(),
+            TupleBuilder::new().null().null().null().null().finish(),
         ]
         .into_iter()
         .for_each(|want| {
-            let mut builder = TupleBuilder::new(&schema);
-            builder = (0..schema.len())
-                .map(|i| schema.get_physical_attrs(i))
-                .fold(builder, |b, attrs| b.add(want.get_by_physical_attrs(attrs)));
-            let have = builder.finish();
+            let builder = TupleBuilder::new();
+            let have = schema
+                .positions()
+                .fold(builder, |b, position| b.add(want.get(position)))
+                .finish();
 
             assert_eq!(want, have);
         });
@@ -398,59 +378,43 @@ mod test {
 
     #[test]
     fn test_next() {
-        let nullable = true;
-
-        let schema = Schema::default().add_column("c1".into(), Type::Int8, nullable);
-        let tuple = TupleBuilder::new(&schema).int8(0).finish();
-        let have = tuple.next(&schema);
-        let want = TupleBuilder::new(&schema).int8(1).finish();
+        let tuple = TupleBuilder::new().int8(0).finish();
+        let have = tuple.next();
+        let want = TupleBuilder::new().int8(1).finish();
         assert_eq!(want, have);
 
-        let schema = Schema::default().add_column("c1".into(), Type::Float32, nullable);
-        let tuple = TupleBuilder::new(&schema).float32(0.).finish();
-        let have = tuple.next(&schema);
-        let want = TupleBuilder::new(&schema)
-            .float32(0. + f32::EPSILON)
-            .finish();
+        let tuple = TupleBuilder::new().float32(0.).finish();
+        let have = tuple.next();
+        let want = TupleBuilder::new().float32(0. + f32::EPSILON).finish();
         assert_eq!(want, have);
 
-        let schema = Schema::default().add_column("c1".into(), Type::String, nullable);
-        let tuple = TupleBuilder::new(&schema).string(&[0]).finish();
-        let have = tuple.next(&schema);
-        let want = TupleBuilder::new(&schema).string(&[1]).finish();
+        let tuple = TupleBuilder::new().string(&[0]).finish();
+        let have = tuple.next();
+        let want = TupleBuilder::new().string(&[1]).finish();
         assert_eq!(want, have);
 
-        let schema = Schema::default().add_column("c1".into(), Type::String, nullable);
-        let tuple = TupleBuilder::new(&schema).string(&[255]).finish();
-        let have = tuple.next(&schema);
-        let want = TupleBuilder::new(&schema).string(&[255, 0]).finish();
+        let tuple = TupleBuilder::new().string(&[255]).finish();
+        let have = tuple.next();
+        let want = TupleBuilder::new().string(&[255, 0]).finish();
         assert_eq!(want, have);
     }
 
     #[test]
     fn test_cmp() {
-        let nullable = true;
-
-        let schema = Schema::default()
-            .add_column("c1".into(), Type::Int8, nullable)
-            .add_column("c2".into(), Type::String, nullable)
-            .add_column("c3".into(), Type::Float32, nullable)
-            .add_column("c4".into(), Type::Int32, nullable);
-
         let tuples = [
-            TupleBuilder::new(&schema)
+            TupleBuilder::new()
                 .int8(32)
                 .string(b"abc")
                 .null()
                 .int32(7)
                 .finish(),
-            TupleBuilder::new(&schema)
+            TupleBuilder::new()
                 .int8(32)
                 .string(b"abd")
                 .null()
                 .int32(7)
                 .finish(),
-            TupleBuilder::new(&schema)
+            TupleBuilder::new()
                 .int8(32)
                 .string(b"abc")
                 .null()
@@ -461,35 +425,27 @@ mod test {
         [(0, 0, Equal), (0, 1, Less), (0, 2, Greater)]
             .into_iter()
             .for_each(|(lhs, rhs, want)| {
-                let have = tuples[lhs].cmp(&tuples[rhs], &schema);
+                let have = tuples[lhs].cmp(&tuples[rhs]);
                 assert_eq!(want, have);
             });
     }
 
     #[test]
     fn test_write_read_roundtrip() -> std::io::Result<()> {
-        let nullable = true;
-
-        let schema = Schema::default()
-            .add_column("c1".into(), Type::Int8, nullable)
-            .add_column("c2".into(), Type::String, nullable)
-            .add_column("c3".into(), Type::Float32, nullable)
-            .add_column("c4".into(), Type::Int32, nullable);
-
         let tuples = [
-            TupleBuilder::new(&schema)
+            TupleBuilder::new()
                 .int8(32)
                 .string(b"the quick brown fox jumps over the lazy dog")
                 .null()
                 .int32(7)
                 .finish(),
-            TupleBuilder::new(&schema)
+            TupleBuilder::new()
                 .int8(32)
                 .string(b"abd")
                 .float32(16.)
                 .int32(7)
                 .finish(),
-            TupleBuilder::new(&schema)
+            TupleBuilder::new()
                 .int8(32)
                 .null()
                 .float32(7.2)
@@ -504,16 +460,16 @@ mod test {
 
         c.set_position(0);
         tuples.iter().for_each(|want| {
-            let have = Tuple::read_from(&mut c, &schema).unwrap();
-            assert_eq!(want.cmp(&have, &schema), Equal);
+            let have = Tuple::read_from(&mut c).unwrap();
+            assert_eq!(want.cmp(&have), Equal);
         });
 
         c.set_position(0);
         tuples.iter().for_each(|want| {
             let mut buf = vec![0; want.size()];
             c.read_exact(&mut buf).unwrap();
-            let have = Tuple::from_bytes(&buf, &schema);
-            assert_eq!(want.cmp(&have, &schema), Equal);
+            let have = Tuple::from_bytes(&buf);
+            assert_eq!(want.cmp(&have), Equal);
         });
 
         Ok(())
