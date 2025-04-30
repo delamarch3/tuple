@@ -20,37 +20,6 @@ impl Type {
     }
 }
 
-pub struct OffsetIter<'a, T>
-where
-    T: Iterator<Item = &'a Type>,
-{
-    types: T,
-    offset: usize,
-}
-
-impl<'a, T> Iterator for OffsetIter<'a, T>
-where
-    T: Iterator<Item = &'a Type>,
-{
-    type Item = usize;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let r#type = self.types.next()?;
-        let offset = self.offset;
-        self.offset += r#type.size();
-        Some(offset)
-    }
-}
-
-impl<'a, T> OffsetIter<'a, T>
-where
-    T: Iterator<Item = &'a Type>,
-{
-    pub fn new(types: T) -> Self {
-        Self { types, offset: 0 }
-    }
-}
-
 #[derive(Clone, PartialEq, Debug)]
 pub struct Column {
     table: Option<String>,

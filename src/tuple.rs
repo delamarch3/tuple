@@ -4,7 +4,7 @@ use std::io::{self, Read, Write};
 
 use bytes::{BufMut, BytesMut};
 
-use crate::schema::{OffsetIter, Type};
+use crate::schema::Type;
 use crate::value::Value;
 
 /// The layout of the tuple is:
@@ -160,7 +160,14 @@ impl Tuple {
         let types =
             unsafe { std::slice::from_raw_parts(types.as_ptr() as *const Type, types.len()) }
                 .to_vec();
-        let offsets: Vec<_> = OffsetIter::new(types.iter()).collect();
+        let offsets: Vec<_> = types
+            .iter()
+            .scan(0, |state, r#type| {
+                let offset = *state;
+                *state += r#type.size();
+                Some(offset)
+            })
+            .collect();
 
         let data_size = types.iter().fold(0, |acc, x| acc + x.size());
         let data = &bytes[types_size..types_size + data_size];
@@ -195,7 +202,14 @@ impl Tuple {
         let types =
             unsafe { std::slice::from_raw_parts(types.as_ptr() as *const Type, types.len()) }
                 .to_vec();
-        let offsets: Vec<_> = OffsetIter::new(types.iter()).collect();
+        let offsets: Vec<_> = types
+            .iter()
+            .scan(0, |state, r#type| {
+                let offset = *state;
+                *state += r#type.size();
+                Some(offset)
+            })
+            .collect();
 
         let data_size = types.iter().fold(0, |acc, x| acc + x.size());
         let mut data = BytesMut::zeroed(data_size);
@@ -320,7 +334,15 @@ impl TupleBuilder {
                 .copy_from_slice(&(offset as u16).to_be_bytes());
         }
 
-        let offsets: Vec<_> = OffsetIter::new(self.types.iter()).collect();
+        let offsets = self
+            .types
+            .iter()
+            .scan(0, |state, r#type| {
+                let offset = *state;
+                *state += r#type.size();
+                Some(offset)
+            })
+            .collect();
 
         Tuple {
             types: self.types,
