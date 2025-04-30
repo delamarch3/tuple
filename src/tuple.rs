@@ -4,7 +4,7 @@ use std::io::{self, Read, Write};
 
 use bytes::{BufMut, BytesMut};
 
-use crate::schema::{StringOffsetIter, Type};
+use crate::schema::{OffsetIter, Type};
 use crate::value::Value;
 
 /// The layout of the tuple is:
@@ -21,6 +21,7 @@ use crate::value::Value;
 #[derive(PartialEq)]
 pub struct Tuple {
     types: Vec<Type>,
+    offsets: Vec<usize>,
     data: BytesMut,
 }
 
@@ -54,9 +55,7 @@ impl Tuple {
     /// Gets the value of the ith column of the tuple.
     pub fn get<'a>(&'a self, position: usize) -> Value<'a> {
         let r#type = self.types[position];
-        let offset = self.types[..position]
-            .iter()
-            .fold(0, |acc, x| acc + x.size());
+        let offset = self.offsets[position];
 
         match r#type {
             Type::Null => Value::Null,
@@ -160,19 +159,29 @@ impl Tuple {
         let types =
             unsafe { std::slice::from_raw_parts(types.as_ptr() as *const Type, types.len()) }
                 .to_vec();
+        let offsets: Vec<_> = OffsetIter::new(types.iter()).collect();
 
         let data_size = types.iter().fold(0, |acc, x| acc + x.size());
         let data = &bytes[types_size..types_size + data_size];
 
-        let strings_size = StringOffsetIter::new(types.iter()).fold(0, |acc, offset| {
-            let length =
-                u16::from_be_bytes(data[offset + 2..offset + 4].try_into().unwrap()) as usize;
-            acc + length
-        });
+        let strings_size = types
+            .iter()
+            .enumerate()
+            .filter(|(_, r#type)| matches!(r#type, Type::String))
+            .map(|(position, _)| offsets[position])
+            .fold(0, |acc, offset| {
+                let length =
+                    u16::from_be_bytes(data[offset + 2..offset + 4].try_into().unwrap()) as usize;
+                acc + length
+            });
 
         let data = BytesMut::from(&bytes[types_size..types_size + data_size + strings_size]);
 
-        Self { types, data }
+        Self {
+            types,
+            offsets,
+            data,
+        }
     }
 
     pub fn read_from(r: &mut impl Read) -> io::Result<Tuple> {
@@ -185,23 +194,33 @@ impl Tuple {
         let types =
             unsafe { std::slice::from_raw_parts(types.as_ptr() as *const Type, types.len()) }
                 .to_vec();
+        let offsets: Vec<_> = OffsetIter::new(types.iter()).collect();
 
         let data_size = types.iter().fold(0, |acc, x| acc + x.size());
         let mut data = BytesMut::zeroed(data_size);
         r.read_exact(&mut data)?;
 
-        let strings_size = StringOffsetIter::new(types.iter()).fold(0, |acc, offset| {
-            let length =
-                u16::from_be_bytes(data[offset + 2..offset + 4].try_into().unwrap()) as usize;
-            acc + length
-        });
+        let strings_size = types
+            .iter()
+            .enumerate()
+            .filter(|(_, r#type)| matches!(r#type, Type::String))
+            .map(|(position, _)| offsets[position])
+            .fold(0, |acc, offset| {
+                let length =
+                    u16::from_be_bytes(data[offset + 2..offset + 4].try_into().unwrap()) as usize;
+                acc + length
+            });
 
         let mut strings = vec![0; strings_size];
         r.read_exact(&mut strings)?;
 
         data.extend(strings);
 
-        Ok(Self { types, data })
+        Ok(Self {
+            types,
+            offsets,
+            data,
+        })
     }
 }
 
@@ -300,8 +319,11 @@ impl TupleBuilder {
                 .copy_from_slice(&(offset as u16).to_be_bytes());
         }
 
+        let offsets: Vec<_> = OffsetIter::new(self.types.iter()).collect();
+
         Tuple {
             types: self.types,
+            offsets,
             data: self.data,
         }
     }

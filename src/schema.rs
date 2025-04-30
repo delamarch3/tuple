@@ -20,7 +20,7 @@ impl Type {
     }
 }
 
-pub struct StringOffsetIter<'a, T>
+pub struct OffsetIter<'a, T>
 where
     T: Iterator<Item = &'a Type>,
 {
@@ -28,31 +28,21 @@ where
     offset: usize,
 }
 
-impl<'a, T> Iterator for StringOffsetIter<'a, T>
+impl<'a, T> Iterator for OffsetIter<'a, T>
 where
     T: Iterator<Item = &'a Type>,
 {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let r#type = self.types.next()?;
-            match r#type {
-                Type::String => {
-                    let offset = self.offset;
-                    self.offset += r#type.size();
-                    break Some(offset);
-                }
-                _ => {
-                    self.offset += r#type.size();
-                    continue;
-                }
-            }
-        }
+        let r#type = self.types.next()?;
+        let offset = self.offset;
+        self.offset += r#type.size();
+        Some(offset)
     }
 }
 
-impl<'a, T> StringOffsetIter<'a, T>
+impl<'a, T> OffsetIter<'a, T>
 where
     T: Iterator<Item = &'a Type>,
 {
