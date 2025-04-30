@@ -32,13 +32,6 @@ pub enum LogicalOperator {
     Or,
 }
 
-#[derive(Clone, Copy)]
-pub enum Operator {
-    Arithmetic(ArithmeticOperator),
-    Comparison(ComparisonOperator),
-    Logical(LogicalOperator),
-}
-
 pub type Function = for<'a> fn(tuple: &'a Tuple, args: &Vec<PhysicalExpr>) -> Value<'a>;
 
 pub enum PhysicalExpr {
@@ -60,10 +53,19 @@ pub enum PhysicalExpr {
         high: Box<PhysicalExpr>,
         negated: bool,
     },
-    // TODO: try splitting up by operator type
-    BinaryOp {
+    ArithmeticOp {
         lhs: Box<PhysicalExpr>,
-        op: Operator,
+        op: ArithmeticOperator,
+        rhs: Box<PhysicalExpr>,
+    },
+    ComparisonOp {
+        lhs: Box<PhysicalExpr>,
+        op: ComparisonOperator,
+        rhs: Box<PhysicalExpr>,
+    },
+    LogicalOp {
+        lhs: Box<PhysicalExpr>,
+        op: LogicalOperator,
         rhs: Box<PhysicalExpr>,
     },
 }
@@ -167,34 +169,38 @@ fn physical_between(
 
 fn physical_binary_op(lhs: Expr, op: ExprOperator, rhs: Expr, schema: &Schema) -> PhysicalExpr {
     let lhs = Box::new(PhysicalExpr::new(lhs, schema));
-    let op = physical_operator(op);
     let rhs = Box::new(PhysicalExpr::new(rhs, schema));
-    PhysicalExpr::BinaryOp { lhs, op, rhs }
-}
 
-fn physical_operator(op: ExprOperator) -> Operator {
     match op {
-        ExprOperator::Arithmetic(arithmetic_operator) => {
-            Operator::Arithmetic(match arithmetic_operator {
+        ExprOperator::Arithmetic(op) => {
+            let op = match op {
                 ExprArithmeticOperator::Add => ArithmeticOperator::Add,
                 ExprArithmeticOperator::Sub => ArithmeticOperator::Sub,
                 ExprArithmeticOperator::Div => ArithmeticOperator::Div,
                 ExprArithmeticOperator::Mul => ArithmeticOperator::Mul,
-            })
+            };
+
+            PhysicalExpr::ArithmeticOp { lhs, op, rhs }
         }
-        ExprOperator::Comparison(comparison_operator) => {
-            Operator::Comparison(match comparison_operator {
+        ExprOperator::Comparison(op) => {
+            let op = match op {
                 ExprComparisonOperator::Lt => ComparisonOperator::Lt,
                 ExprComparisonOperator::Le => ComparisonOperator::Le,
                 ExprComparisonOperator::Eq => ComparisonOperator::Eq,
                 ExprComparisonOperator::Neq => ComparisonOperator::Neq,
                 ExprComparisonOperator::Ge => ComparisonOperator::Ge,
                 ExprComparisonOperator::Gt => ComparisonOperator::Gt,
-            })
+            };
+
+            PhysicalExpr::ComparisonOp { lhs, op, rhs }
         }
-        ExprOperator::Logical(logical_operator) => Operator::Logical(match logical_operator {
-            ExprLogicalOperator::And => LogicalOperator::And,
-            ExprLogicalOperator::Or => LogicalOperator::Or,
-        }),
+        ExprOperator::Logical(logical_operator) => {
+            let op = match logical_operator {
+                ExprLogicalOperator::And => LogicalOperator::And,
+                ExprLogicalOperator::Or => LogicalOperator::Or,
+            };
+
+            PhysicalExpr::LogicalOp { lhs, op, rhs }
+        }
     }
 }

@@ -1,5 +1,5 @@
 use crate::physical_expr::{
-    ArithmeticOperator, ComparisonOperator, LogicalOperator, Operator, PhysicalExpr as Expr,
+    ArithmeticOperator, ComparisonOperator, LogicalOperator, PhysicalExpr as Expr,
 };
 use crate::tuple::Tuple;
 use crate::value::Value;
@@ -22,7 +22,9 @@ pub fn evaluate<'a>(tuple: &'a Tuple, expr: &Expr) -> Value<'a> {
             high,
             negated,
         } => evaluate_between(tuple, expr, low, high, *negated),
-        Expr::BinaryOp { lhs, op, rhs } => evaluate_binary_op(tuple, lhs, *op, rhs),
+        Expr::ArithmeticOp { lhs, op, rhs } => evaluate_arithmetic_binary_op(tuple, lhs, *op, rhs),
+        Expr::ComparisonOp { lhs, op, rhs } => evaluate_comparison_binary_op(tuple, lhs, *op, rhs),
+        Expr::LogicalOp { lhs, op, rhs } => evaluate_logical_binary_op(tuple, lhs, *op, rhs),
     }
 }
 
@@ -98,23 +100,16 @@ fn evaluate_between<'a>(
     Value::Int8(((value >= low && value <= high) && !negated) as i8)
 }
 
-fn evaluate_binary_op<'a>(tuple: &'a Tuple, lhs: &Expr, op: Operator, rhs: &Expr) -> Value<'a> {
+#[inline]
+fn evaluate_arithmetic_binary_op<'a>(
+    tuple: &'a Tuple,
+    lhs: &Expr,
+    op: ArithmeticOperator,
+    rhs: &Expr,
+) -> Value<'a> {
     let lhs = evaluate(tuple, lhs);
     let rhs = evaluate(tuple, rhs);
 
-    match op {
-        Operator::Arithmetic(op) => evaluate_arithmetic_binary_op(lhs, op, rhs),
-        Operator::Comparison(op) => evaluate_comparison_binary_op(lhs, op, rhs),
-        Operator::Logical(op) => evaluate_logical_binary_op(lhs, op, rhs),
-    }
-}
-
-#[inline]
-fn evaluate_arithmetic_binary_op<'a>(
-    lhs: Value<'a>,
-    op: ArithmeticOperator,
-    rhs: Value<'a>,
-) -> Value<'a> {
     match op {
         ArithmeticOperator::Add => lhs + rhs,
         ArithmeticOperator::Sub => lhs - rhs,
@@ -125,10 +120,14 @@ fn evaluate_arithmetic_binary_op<'a>(
 
 #[inline]
 fn evaluate_comparison_binary_op<'a>(
-    lhs: Value<'a>,
+    tuple: &'a Tuple,
+    lhs: &Expr,
     op: ComparisonOperator,
-    rhs: Value<'a>,
+    rhs: &Expr,
 ) -> Value<'a> {
+    let lhs = evaluate(tuple, lhs);
+    let rhs = evaluate(tuple, rhs);
+
     let result = match op {
         ComparisonOperator::Lt => lhs < rhs,
         ComparisonOperator::Le => lhs <= rhs,
@@ -143,10 +142,14 @@ fn evaluate_comparison_binary_op<'a>(
 
 #[inline]
 fn evaluate_logical_binary_op<'a>(
-    lhs: Value<'a>,
+    tuple: &'a Tuple,
+    lhs: &Expr,
     op: LogicalOperator,
-    rhs: Value<'a>,
+    rhs: &Expr,
 ) -> Value<'a> {
+    let lhs = evaluate(tuple, lhs);
+    let rhs = evaluate(tuple, rhs);
+
     let result = match op {
         LogicalOperator::And => !lhs.is_zero() && !rhs.is_zero(),
         LogicalOperator::Or => !lhs.is_zero() || !rhs.is_zero(),
