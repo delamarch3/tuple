@@ -4,6 +4,7 @@ use crate::physical_expr::{
 use crate::tuple::Tuple;
 use crate::value::Value;
 
+#[inline]
 pub fn evaluate<'a>(tuple: &'a Tuple, expr: &Expr) -> Value<'a> {
     match expr {
         Expr::Ident(position) => tuple.get(*position),
@@ -108,6 +109,7 @@ fn evaluate_binary_op<'a>(tuple: &'a Tuple, lhs: &Expr, op: Operator, rhs: &Expr
     }
 }
 
+#[inline]
 fn evaluate_arithmetic_binary_op<'a>(
     lhs: Value<'a>,
     op: ArithmeticOperator,
@@ -121,6 +123,7 @@ fn evaluate_arithmetic_binary_op<'a>(
     }
 }
 
+#[inline]
 fn evaluate_comparison_binary_op<'a>(
     lhs: Value<'a>,
     op: ComparisonOperator,
@@ -138,6 +141,7 @@ fn evaluate_comparison_binary_op<'a>(
     Value::Int8(result as i8)
 }
 
+#[inline]
 fn evaluate_logical_binary_op<'a>(
     lhs: Value<'a>,
     op: LogicalOperator,

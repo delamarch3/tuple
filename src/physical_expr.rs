@@ -60,6 +60,7 @@ pub enum PhysicalExpr {
         high: Box<PhysicalExpr>,
         negated: bool,
     },
+    // TODO: try splitting up by operator type
     BinaryOp {
         lhs: Box<PhysicalExpr>,
         op: Operator,
