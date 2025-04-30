@@ -30,13 +30,6 @@ pub struct Column {
     nullable: bool,
 }
 
-#[derive(Clone, Copy)]
-pub struct PhysicalAttrs {
-    pub r#type: Type,
-    pub position: usize,
-    pub offset: usize,
-}
-
 impl Column {
     pub fn r#type(&self) -> Type {
         self.r#type
@@ -44,14 +37,6 @@ impl Column {
 
     pub fn position(&self) -> usize {
         self.position
-    }
-
-    pub fn physical_attrs(&self) -> PhysicalAttrs {
-        PhysicalAttrs {
-            r#type: self.r#type,
-            position: self.position,
-            offset: self.offset,
-        }
     }
 
     pub fn nullable(&self) -> bool {

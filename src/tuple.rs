@@ -239,10 +239,10 @@ impl Tuple {
     }
 }
 
-/// Creates a new tuple using only the columns in the schema. The schema offsets are expected to
-/// align with the offsets in the tuple. This is useful for creating composite key tuple out of
+/// Creates a new tuple using only the values at the given positions. The positions are expected to
+/// align with the values in the tuple. This is useful for creating composite key tuple out of
 /// non-contiguous columns.
-pub fn fit_tuple_with_schema(tuple: &Tuple, positions: impl Iterator<Item = usize>) -> Tuple {
+pub fn fit_tuple_with_positions(tuple: &Tuple, positions: impl Iterator<Item = usize>) -> Tuple {
     let mut builder = TupleBuilder::new();
     for position in positions {
         let value = tuple.get(position);
