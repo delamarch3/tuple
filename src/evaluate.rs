@@ -4,7 +4,7 @@ use crate::physical_expr::{
 use crate::tuple::Tuple;
 use crate::value::Value;
 
-#[inline]
+#[inline(always)]
 pub fn evaluate<'a>(tuple: &'a Tuple, expr: &Expr) -> Value<'a> {
     match expr {
         Expr::Ident(position) => tuple.get(*position),
@@ -100,7 +100,7 @@ fn evaluate_between<'a>(
     Value::Int8(((value >= low && value <= high) && !negated) as i8)
 }
 
-#[inline]
+#[inline(always)]
 fn evaluate_arithmetic_binary_op<'a>(
     tuple: &'a Tuple,
     lhs: &Expr,
@@ -118,7 +118,7 @@ fn evaluate_arithmetic_binary_op<'a>(
     }
 }
 
-#[inline]
+#[inline(always)]
 fn evaluate_comparison_binary_op<'a>(
     tuple: &'a Tuple,
     lhs: &Expr,
@@ -140,7 +140,7 @@ fn evaluate_comparison_binary_op<'a>(
     Value::Int8(result as i8)
 }
 
-#[inline]
+#[inline(always)]
 fn evaluate_logical_binary_op<'a>(
     tuple: &'a Tuple,
     lhs: &Expr,

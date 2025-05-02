@@ -77,7 +77,7 @@ impl Tuple {
     }
 
     /// Gets the value of the ith column of the tuple.
-    #[inline]
+    #[inline(always)]
     pub fn get<'a>(&'a self, position: usize) -> Value<'a> {
         let r#type = self.types[position];
         let offset = self.offsets[position];
