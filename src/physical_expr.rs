@@ -8,7 +8,7 @@ use crate::schema::{Column, Schema};
 use crate::tuple::Tuple;
 use crate::value::Value;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ArithmeticOperator {
     Add,
     Sub,
@@ -16,7 +16,7 @@ pub enum ArithmeticOperator {
     Mul,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ComparisonOperator {
     Lt,
     Le,
@@ -26,7 +26,7 @@ pub enum ComparisonOperator {
     Gt,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum LogicalOperator {
     And,
     Or,
@@ -34,6 +34,7 @@ pub enum LogicalOperator {
 
 pub type Function = for<'a> fn(tuple: &'a Tuple, args: &Vec<PhysicalExpr>) -> Value<'a>;
 
+#[derive(Debug, PartialEq)]
 pub enum PhysicalExpr {
     Ident(usize),
     Function(Function, Vec<PhysicalExpr>),
