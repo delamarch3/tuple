@@ -6,6 +6,7 @@ use tuple::evaluate::evaluate;
 use tuple::expr::{concat, contains, ident, lit};
 use tuple::physical_expr::PhysicalExpr;
 use tuple::schema::{Schema, Type};
+use tuple::simplify::simplify;
 use tuple::tuple::Tuple;
 
 fn evaluate_benchmark(c: &mut Criterion) {
@@ -37,7 +38,7 @@ fn evaluate_benchmark(c: &mut Criterion) {
         .add(lit(5))
         .lt(lit(25))
         .and(ident("retailprice").gt(lit(1499.5)));
-    let expr = PhysicalExpr::new(expr, &schema);
+    let expr = simplify(PhysicalExpr::new(expr, &schema));
     c.bench_function("math (size + 5 < 25 and retailprice > 1499.5)", |b| {
         b.iter(|| {
             black_box(tuples.iter().for_each(|tuple| {
@@ -47,7 +48,7 @@ fn evaluate_benchmark(c: &mut Criterion) {
     });
 
     let expr = ident("mfgr").eq(lit("Manufacturer#1"));
-    let expr = PhysicalExpr::new(expr, &schema);
+    let expr = simplify(PhysicalExpr::new(expr, &schema));
     c.bench_function("select 1/5 (mfgr == Manufacturer#1)", |b| {
         b.iter(|| {
             black_box(tuples.iter().for_each(|tuple| {
@@ -59,7 +60,7 @@ fn evaluate_benchmark(c: &mut Criterion) {
     let expr = ident("partkey")
         .add(lit(1).sub(lit(1).mul(lit(1).div(lit(1).add(lit(1))))))
         .and(lit(1).sub(lit(1).mul(lit(1).div(lit(1).add(lit(1))))));
-    let expr = PhysicalExpr::new(expr, &schema);
+    let expr = simplify(PhysicalExpr::new(expr, &schema));
     c.bench_function(
         "long expr (partkey + (1 - 1 * 1 / 1 + 1) and (1 - 1 * 1 / 1 + 1))",
         |b| {
@@ -72,7 +73,7 @@ fn evaluate_benchmark(c: &mut Criterion) {
     );
 
     let expr = ident("partkey").between(lit(1), lit(100_000));
-    let expr = PhysicalExpr::new(expr, &schema);
+    let expr = simplify(PhysicalExpr::new(expr, &schema));
     c.bench_function("between (partkey between 1 and 100_000)", |b| {
         b.iter(|| {
             black_box(tuples.iter().for_each(|tuple| {
@@ -87,7 +88,7 @@ fn evaluate_benchmark(c: &mut Criterion) {
         lit("Manufacturer#3"),
         lit("Manufacturer#4"),
     ]);
-    let expr = PhysicalExpr::new(expr, &schema);
+    let expr = simplify(PhysicalExpr::new(expr, &schema));
     c.bench_function(
         "in list (mfgr in (Manufacturer#1, Manufacturer#2, Manufacturer#3, Manufacturer#4))",
         |b| {
@@ -103,7 +104,7 @@ fn evaluate_benchmark(c: &mut Criterion) {
         concat(vec![ident("container"), ident("container")]),
         lit("CANWRAP"),
     ]);
-    let expr = PhysicalExpr::new(expr, &schema);
+    let expr = simplify(PhysicalExpr::new(expr, &schema));
     c.bench_function(
         "string functions (contains(concat(container, container), CANWRAP)",
         |b| {

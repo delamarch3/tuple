@@ -229,8 +229,8 @@ fn simplify_logical(expr: PhysicalExpr) -> PhysicalExpr {
 
     fn simplify_and(lhs: PhysicalExpr, rhs: PhysicalExpr) -> PhysicalExpr {
         match (lhs, rhs) {
-            (id @ PhysicalExpr::Ident(_), PhysicalExpr::Value(rhs)) if !rhs.is_zero() => id,
-            (PhysicalExpr::Value(lhs), id @ PhysicalExpr::Ident(_)) if !lhs.is_zero() => id,
+            (expr, PhysicalExpr::Value(rhs)) if !rhs.is_zero() => expr,
+            (PhysicalExpr::Value(lhs), expr) if !lhs.is_zero() => expr,
             (PhysicalExpr::Ident(c1), PhysicalExpr::Ident(c2)) if c1 == c2 => {
                 PhysicalExpr::Ident(c1)
             }
@@ -244,12 +244,8 @@ fn simplify_logical(expr: PhysicalExpr) -> PhysicalExpr {
 
     fn simplify_or(lhs: PhysicalExpr, rhs: PhysicalExpr) -> PhysicalExpr {
         match (lhs, rhs) {
-            (PhysicalExpr::Ident(_), PhysicalExpr::Value(rhs)) if !rhs.is_zero() => {
-                PhysicalExpr::Value(Value::Int8(1))
-            }
-            (PhysicalExpr::Value(lhs), PhysicalExpr::Ident(_)) if !lhs.is_zero() => {
-                PhysicalExpr::Value(Value::Int8(1))
-            }
+            (_, PhysicalExpr::Value(rhs)) if !rhs.is_zero() => PhysicalExpr::Value(Value::Int8(1)),
+            (PhysicalExpr::Value(lhs), _) if !lhs.is_zero() => PhysicalExpr::Value(Value::Int8(1)),
             (lhs, rhs) => PhysicalExpr::LogicalOp {
                 lhs: Box::new(lhs),
                 op: LogicalOperator::Or,
@@ -361,6 +357,16 @@ mod test {
                         op: ComparisonOperator::Gt,
                         rhs: Box::new(PhysicalExpr::Ident(0)),
                     }),
+                },
+            ),
+            (
+                ident("c1")
+                    .add(lit(1).sub(lit(1).mul(lit(1).div(lit(1).add(lit(1))))))
+                    .and(lit(1).sub(lit(1).mul(lit(1).div(lit(1).add(lit(1)))))),
+                PhysicalExpr::ArithmeticOp {
+                    lhs: Box::new(PhysicalExpr::Ident(0)),
+                    op: ArithmeticOperator::Add,
+                    rhs: Box::new(PhysicalExpr::Value(Value::Int32(1))),
                 },
             ),
         ]
