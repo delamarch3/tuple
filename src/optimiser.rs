@@ -3,7 +3,13 @@ use crate::value::Value;
 
 type Rule = fn(expr: PhysicalExpr) -> PhysicalExpr;
 
-static RULES: &[Rule] = &[optimise_inputs, optimise_const, optimise_inequality];
+static RULES: &[Rule] = &[
+    optimise_inputs,
+    optimise_const,
+    optimise_comparison,
+    optimise_inequality,
+    optimise_logical,
+];
 
 pub fn optimise(expr: PhysicalExpr) -> PhysicalExpr {
     RULES.iter().fold(expr, |expr, rule| rule(expr))
@@ -135,14 +141,14 @@ fn optimise_inequality(expr: PhysicalExpr) -> PhysicalExpr {
                     lhs: Box::new(llhs),
                     op,
                     rhs: Box::new(PhysicalExpr::Value(inverse_arithmetic_op!(rhs, aop, lrhs))),
-                }
+                };
             }
             (PhysicalExpr::Value(llhs), lrhs) if aop.is_commutative() => {
                 return PhysicalExpr::ComparisonOp {
-                    lhs: Box::new(PhysicalExpr::Value(inverse_arithmetic_op!(rhs, aop, llhs))),
+                    lhs: Box::new(lrhs),
                     op,
-                    rhs: Box::new(lrhs),
-                }
+                    rhs: Box::new(PhysicalExpr::Value(inverse_arithmetic_op!(rhs, aop, llhs))),
+                };
             }
             (llhs, lrhs) => PhysicalExpr::ComparisonOp {
                 lhs: Box::new(PhysicalExpr::ArithmeticOp {
@@ -164,9 +170,9 @@ fn optimise_inequality(expr: PhysicalExpr) -> PhysicalExpr {
         ) => match (*rlhs, *rrhs) {
             (rlhs, PhysicalExpr::Value(rrhs)) => {
                 return PhysicalExpr::ComparisonOp {
-                    lhs: Box::new(rlhs),
+                    lhs: Box::new(PhysicalExpr::Value(inverse_arithmetic_op!(lhs, aop, rrhs))),
                     op,
-                    rhs: Box::new(PhysicalExpr::Value(inverse_arithmetic_op!(lhs, aop, rrhs))),
+                    rhs: Box::new(rlhs),
                 }
             }
             (PhysicalExpr::Value(rlhs), rrhs) if aop.is_commutative() => {
@@ -194,13 +200,68 @@ fn optimise_inequality(expr: PhysicalExpr) -> PhysicalExpr {
     }
 }
 
-fn optimise_boolean(expr: PhysicalExpr) -> PhysicalExpr {
-    // c1 and c1 -> c1
-    // c1 and 1 -> c1
-    // c1 or 1 -> true
-    // c1 < c1 -> false
-    // c1 <= c1 -> true
-    expr
+fn optimise_comparison(expr: PhysicalExpr) -> PhysicalExpr {
+    let PhysicalExpr::ComparisonOp { lhs, op, rhs } = expr else {
+        return expr;
+    };
+
+    match (*lhs, *rhs) {
+        (PhysicalExpr::Ident(c1), PhysicalExpr::Ident(c2)) if c1 == c2 => match op {
+            ComparisonOperator::Eq | ComparisonOperator::Le | ComparisonOperator::Ge => {
+                PhysicalExpr::Value(Value::Int8(1))
+            }
+            ComparisonOperator::Lt | ComparisonOperator::Neq | ComparisonOperator::Gt => {
+                PhysicalExpr::Value(Value::Int8(0))
+            }
+        },
+        (lhs, rhs) => PhysicalExpr::ComparisonOp {
+            lhs: Box::new(lhs),
+            op,
+            rhs: Box::new(rhs),
+        },
+    }
+}
+
+fn optimise_logical(expr: PhysicalExpr) -> PhysicalExpr {
+    let PhysicalExpr::LogicalOp { lhs, op, rhs } = expr else {
+        return expr;
+    };
+
+    fn optimise_and(lhs: PhysicalExpr, rhs: PhysicalExpr) -> PhysicalExpr {
+        match (lhs, rhs) {
+            (id @ PhysicalExpr::Ident(_), PhysicalExpr::Value(rhs)) if !rhs.is_zero() => id,
+            (PhysicalExpr::Value(lhs), id @ PhysicalExpr::Ident(_)) if !lhs.is_zero() => id,
+            (PhysicalExpr::Ident(c1), PhysicalExpr::Ident(c2)) if c1 == c2 => {
+                PhysicalExpr::Ident(c1)
+            }
+            (lhs, rhs) => PhysicalExpr::LogicalOp {
+                lhs: Box::new(lhs),
+                op: LogicalOperator::And,
+                rhs: Box::new(rhs),
+            },
+        }
+    }
+
+    fn optimise_or(lhs: PhysicalExpr, rhs: PhysicalExpr) -> PhysicalExpr {
+        match (lhs, rhs) {
+            (PhysicalExpr::Ident(_), PhysicalExpr::Value(rhs)) if !rhs.is_zero() => {
+                PhysicalExpr::Value(Value::Int8(1))
+            }
+            (PhysicalExpr::Value(lhs), PhysicalExpr::Ident(_)) if !lhs.is_zero() => {
+                PhysicalExpr::Value(Value::Int8(1))
+            }
+            (lhs, rhs) => PhysicalExpr::LogicalOp {
+                lhs: Box::new(lhs),
+                op: LogicalOperator::Or,
+                rhs: Box::new(rhs),
+            },
+        }
+    }
+
+    match op {
+        LogicalOperator::And => optimise_and(*lhs, *rhs),
+        LogicalOperator::Or => optimise_or(*lhs, *rhs),
+    }
 }
 
 #[cfg(test)]
@@ -265,17 +326,17 @@ mod test {
             (
                 lit(5).add(ident("c1")).lt(lit(25)),
                 PhysicalExpr::ComparisonOp {
-                    rhs: Box::new(PhysicalExpr::Ident(0)),
+                    lhs: Box::new(PhysicalExpr::Ident(0)),
                     op: ComparisonOperator::Lt,
-                    lhs: Box::new(PhysicalExpr::Value(Value::Int32(20))),
+                    rhs: Box::new(PhysicalExpr::Value(Value::Int32(20))),
                 },
             ),
             (
                 lit(25).gt(ident("c1").add(lit(5))),
                 PhysicalExpr::ComparisonOp {
-                    lhs: Box::new(PhysicalExpr::Ident(0)),
+                    lhs: Box::new(PhysicalExpr::Value(Value::Int32(20))),
                     op: ComparisonOperator::Gt,
-                    rhs: Box::new(PhysicalExpr::Value(Value::Int32(20))),
+                    rhs: Box::new(PhysicalExpr::Ident(0)),
                 },
             ),
             (
@@ -286,34 +347,19 @@ mod test {
                     rhs: Box::new(PhysicalExpr::Ident(0)),
                 },
             ),
-            (
-                ident("c1").and(ident("c1")),
-                PhysicalExpr::LogicalOp {
-                    lhs: Box::new(PhysicalExpr::Ident(0)),
-                    op: LogicalOperator::And,
-                    rhs: Box::new(PhysicalExpr::Ident(0)),
-                },
-            ),
+            (ident("c1").and(ident("c1")), PhysicalExpr::Ident(0)),
             (
                 ident("c1")
                     .and(ident("c1"))
                     .and(ident("c1"))
                     .and(lit(25).gt(ident("c1").add(lit(5)))),
                 PhysicalExpr::LogicalOp {
-                    lhs: Box::new(PhysicalExpr::LogicalOp {
-                        lhs: Box::new(PhysicalExpr::LogicalOp {
-                            lhs: Box::new(PhysicalExpr::Ident(0)),
-                            op: LogicalOperator::And,
-                            rhs: Box::new(PhysicalExpr::Ident(0)),
-                        }),
-                        op: LogicalOperator::And,
-                        rhs: Box::new(PhysicalExpr::Ident(0)),
-                    }),
+                    lhs: Box::new(PhysicalExpr::Ident(0)),
                     op: LogicalOperator::And,
                     rhs: Box::new(PhysicalExpr::ComparisonOp {
-                        lhs: Box::new(PhysicalExpr::Ident(0)),
+                        lhs: Box::new(PhysicalExpr::Value(Value::Int32(20))),
                         op: ComparisonOperator::Gt,
-                        rhs: Box::new(PhysicalExpr::Value(Value::Int32(20))),
+                        rhs: Box::new(PhysicalExpr::Ident(0)),
                     }),
                 },
             ),
