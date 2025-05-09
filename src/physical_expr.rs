@@ -16,6 +16,15 @@ pub enum ArithmeticOperator {
     Mul,
 }
 
+impl ArithmeticOperator {
+    pub fn is_commutative(&self) -> bool {
+        match self {
+            ArithmeticOperator::Add | ArithmeticOperator::Mul => true,
+            ArithmeticOperator::Sub | ArithmeticOperator::Div => false,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ComparisonOperator {
     Lt,

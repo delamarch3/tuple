@@ -3,7 +3,7 @@ use crate::value::Value;
 
 type Rule = fn(expr: PhysicalExpr) -> PhysicalExpr;
 
-static RULES: &[Rule] = &[optimise_inputs, optimise_binary_op, optimise_inequality];
+static RULES: &[Rule] = &[optimise_inputs, optimise_const, optimise_inequality];
 
 pub fn optimise(expr: PhysicalExpr) -> PhysicalExpr {
     RULES.iter().fold(expr, |expr, rule| rule(expr))
@@ -80,7 +80,7 @@ fn optimise_inputs(expr: PhysicalExpr) -> PhysicalExpr {
     }
 }
 
-fn optimise_binary_op(expr: PhysicalExpr) -> PhysicalExpr {
+fn optimise_const(expr: PhysicalExpr) -> PhysicalExpr {
     match expr {
         PhysicalExpr::ArithmeticOp { lhs, op, rhs } => match (*lhs, *rhs) {
             (PhysicalExpr::Value(lhs), PhysicalExpr::Value(rhs)) => {
@@ -121,73 +121,75 @@ fn optimise_inequality(expr: PhysicalExpr) -> PhysicalExpr {
         return expr;
     };
 
-    match *lhs {
-        PhysicalExpr::ArithmeticOp {
-            lhs: llhs,
-            op: aop,
-            rhs: lrhs,
-        } => match (*llhs, *lrhs) {
-            (llhs, PhysicalExpr::Value(lrhs)) => match *rhs {
-                PhysicalExpr::Value(rhs) => {
-                    return PhysicalExpr::ComparisonOp {
-                        lhs: Box::new(llhs),
-                        op,
-                        rhs: Box::new(PhysicalExpr::Value(inverse_arithmetic_op!(rhs, aop, lrhs))),
-                    };
-                }
-                _ => todo!(),
+    match (*lhs, *rhs) {
+        (
+            PhysicalExpr::ArithmeticOp {
+                lhs: llhs,
+                op: aop,
+                rhs: lrhs,
             },
-            (PhysicalExpr::Value(llhs), lrhs) => match *rhs {
-                PhysicalExpr::Value(rhs) => {
-                    return PhysicalExpr::ComparisonOp {
-                        lhs: Box::new(PhysicalExpr::Value(inverse_arithmetic_op!(rhs, aop, llhs))),
-                        op,
-                        rhs: Box::new(lrhs),
-                    };
+            PhysicalExpr::Value(rhs),
+        ) => match (*llhs, *lrhs) {
+            (llhs, PhysicalExpr::Value(lrhs)) => {
+                return PhysicalExpr::ComparisonOp {
+                    lhs: Box::new(llhs),
+                    op,
+                    rhs: Box::new(PhysicalExpr::Value(inverse_arithmetic_op!(rhs, aop, lrhs))),
                 }
-                _ => todo!(),
+            }
+            (PhysicalExpr::Value(llhs), lrhs) if aop.is_commutative() => {
+                return PhysicalExpr::ComparisonOp {
+                    lhs: Box::new(PhysicalExpr::Value(inverse_arithmetic_op!(rhs, aop, llhs))),
+                    op,
+                    rhs: Box::new(lrhs),
+                }
+            }
+            (llhs, lrhs) => PhysicalExpr::ComparisonOp {
+                lhs: Box::new(PhysicalExpr::ArithmeticOp {
+                    lhs: Box::new(llhs),
+                    op: aop,
+                    rhs: Box::new(lrhs),
+                }),
+                op,
+                rhs: Box::new(PhysicalExpr::Value(rhs)),
             },
-            _ => todo!(),
         },
-        lhs => match *rhs {
+        (
+            PhysicalExpr::Value(lhs),
             PhysicalExpr::ArithmeticOp {
                 lhs: rlhs,
                 op: aop,
                 rhs: rrhs,
-            } => match (*rlhs, *rrhs) {
-                (rlhs, PhysicalExpr::Value(rrhs)) => match lhs {
-                    PhysicalExpr::Value(rhs) => {
-                        return PhysicalExpr::ComparisonOp {
-                            lhs: Box::new(rlhs),
-                            op,
-                            rhs: Box::new(PhysicalExpr::Value(inverse_arithmetic_op!(
-                                rhs, aop, rrhs
-                            ))),
-                        };
-                    }
-                    _ => todo!(),
-                },
-                (PhysicalExpr::Value(rlhs), rrhs) => match lhs {
-                    PhysicalExpr::Value(rhs) => {
-                        return PhysicalExpr::ComparisonOp {
-                            lhs: Box::new(PhysicalExpr::Value(inverse_arithmetic_op!(
-                                rhs, aop, rlhs
-                            ))),
-                            op,
-                            rhs: Box::new(rrhs),
-                        };
-                    }
-                    _ => todo!(),
-                },
-                _ => todo!(),
             },
-            _ => {
+        ) => match (*rlhs, *rrhs) {
+            (rlhs, PhysicalExpr::Value(rrhs)) => {
                 return PhysicalExpr::ComparisonOp {
-                    lhs: Box::new(lhs),
+                    lhs: Box::new(rlhs),
                     op,
-                    rhs: Box::new(*rhs),
+                    rhs: Box::new(PhysicalExpr::Value(inverse_arithmetic_op!(lhs, aop, rrhs))),
                 }
             }
+            (PhysicalExpr::Value(rlhs), rrhs) if aop.is_commutative() => {
+                return PhysicalExpr::ComparisonOp {
+                    lhs: Box::new(PhysicalExpr::Value(inverse_arithmetic_op!(lhs, aop, rlhs))),
+                    op,
+                    rhs: Box::new(rrhs),
+                }
+            }
+            (rlhs, rrhs) => PhysicalExpr::ComparisonOp {
+                lhs: Box::new(PhysicalExpr::Value(lhs)),
+                op,
+                rhs: Box::new(PhysicalExpr::ArithmeticOp {
+                    lhs: Box::new(rlhs),
+                    op: aop,
+                    rhs: Box::new(rrhs),
+                }),
+            },
+        },
+        (lhs, rhs) => PhysicalExpr::ComparisonOp {
+            lhs: Box::new(lhs),
+            op,
+            rhs: Box::new(rhs),
         },
     }
 }
