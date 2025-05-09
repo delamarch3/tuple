@@ -4,14 +4,14 @@ use crate::value::Value;
 type Rule = fn(expr: PhysicalExpr) -> PhysicalExpr;
 
 static RULES: &[Rule] = &[
-    optimise_inputs,
-    optimise_const,
-    optimise_comparison,
-    optimise_inequality,
-    optimise_logical,
+    simplify_inputs,
+    simplify_const,
+    simplify_comparison,
+    simplify_inequality,
+    simplify_logical,
 ];
 
-pub fn optimise(expr: PhysicalExpr) -> PhysicalExpr {
+pub fn simplify(expr: PhysicalExpr) -> PhysicalExpr {
     RULES.iter().fold(expr, |expr, rule| rule(expr))
 }
 
@@ -59,22 +59,22 @@ macro_rules! logical_op {
     };
 }
 
-fn optimise_inputs(expr: PhysicalExpr) -> PhysicalExpr {
+fn simplify_inputs(expr: PhysicalExpr) -> PhysicalExpr {
     match expr {
         PhysicalExpr::ArithmeticOp { lhs, op, rhs } => PhysicalExpr::ArithmeticOp {
-            lhs: Box::new(optimise(*lhs)),
+            lhs: Box::new(simplify(*lhs)),
             op,
-            rhs: Box::new(optimise(*rhs)),
+            rhs: Box::new(simplify(*rhs)),
         },
         PhysicalExpr::ComparisonOp { lhs, op, rhs } => PhysicalExpr::ComparisonOp {
-            lhs: Box::new(optimise(*lhs)),
+            lhs: Box::new(simplify(*lhs)),
             op,
-            rhs: Box::new(optimise(*rhs)),
+            rhs: Box::new(simplify(*rhs)),
         },
         PhysicalExpr::LogicalOp { lhs, op, rhs } => PhysicalExpr::LogicalOp {
-            lhs: Box::new(optimise(*lhs)),
+            lhs: Box::new(simplify(*lhs)),
             op,
-            rhs: Box::new(optimise(*rhs)),
+            rhs: Box::new(simplify(*rhs)),
         },
 
         e @ (PhysicalExpr::Ident(..)
@@ -86,7 +86,7 @@ fn optimise_inputs(expr: PhysicalExpr) -> PhysicalExpr {
     }
 }
 
-fn optimise_const(expr: PhysicalExpr) -> PhysicalExpr {
+fn simplify_const(expr: PhysicalExpr) -> PhysicalExpr {
     match expr {
         PhysicalExpr::ArithmeticOp { lhs, op, rhs } => match (*lhs, *rhs) {
             (PhysicalExpr::Value(lhs), PhysicalExpr::Value(rhs)) => {
@@ -122,7 +122,7 @@ fn optimise_const(expr: PhysicalExpr) -> PhysicalExpr {
     }
 }
 
-fn optimise_inequality(expr: PhysicalExpr) -> PhysicalExpr {
+fn simplify_inequality(expr: PhysicalExpr) -> PhysicalExpr {
     let PhysicalExpr::ComparisonOp { lhs, op, rhs } = expr else {
         return expr;
     };
@@ -200,7 +200,7 @@ fn optimise_inequality(expr: PhysicalExpr) -> PhysicalExpr {
     }
 }
 
-fn optimise_comparison(expr: PhysicalExpr) -> PhysicalExpr {
+fn simplify_comparison(expr: PhysicalExpr) -> PhysicalExpr {
     let PhysicalExpr::ComparisonOp { lhs, op, rhs } = expr else {
         return expr;
     };
@@ -222,12 +222,12 @@ fn optimise_comparison(expr: PhysicalExpr) -> PhysicalExpr {
     }
 }
 
-fn optimise_logical(expr: PhysicalExpr) -> PhysicalExpr {
+fn simplify_logical(expr: PhysicalExpr) -> PhysicalExpr {
     let PhysicalExpr::LogicalOp { lhs, op, rhs } = expr else {
         return expr;
     };
 
-    fn optimise_and(lhs: PhysicalExpr, rhs: PhysicalExpr) -> PhysicalExpr {
+    fn simplify_and(lhs: PhysicalExpr, rhs: PhysicalExpr) -> PhysicalExpr {
         match (lhs, rhs) {
             (id @ PhysicalExpr::Ident(_), PhysicalExpr::Value(rhs)) if !rhs.is_zero() => id,
             (PhysicalExpr::Value(lhs), id @ PhysicalExpr::Ident(_)) if !lhs.is_zero() => id,
@@ -242,7 +242,7 @@ fn optimise_logical(expr: PhysicalExpr) -> PhysicalExpr {
         }
     }
 
-    fn optimise_or(lhs: PhysicalExpr, rhs: PhysicalExpr) -> PhysicalExpr {
+    fn simplify_or(lhs: PhysicalExpr, rhs: PhysicalExpr) -> PhysicalExpr {
         match (lhs, rhs) {
             (PhysicalExpr::Ident(_), PhysicalExpr::Value(rhs)) if !rhs.is_zero() => {
                 PhysicalExpr::Value(Value::Int8(1))
@@ -259,8 +259,8 @@ fn optimise_logical(expr: PhysicalExpr) -> PhysicalExpr {
     }
 
     match op {
-        LogicalOperator::And => optimise_and(*lhs, *rhs),
-        LogicalOperator::Or => optimise_or(*lhs, *rhs),
+        LogicalOperator::And => simplify_and(*lhs, *rhs),
+        LogicalOperator::Or => simplify_or(*lhs, *rhs),
     }
 }
 
@@ -273,10 +273,10 @@ mod test {
     use crate::schema::{Schema, Type};
     use crate::value::Value;
 
-    use super::optimise;
+    use super::simplify;
 
     #[test]
-    fn test_optimise() {
+    fn test_simplify() {
         let nullable = false;
         let schema = Schema::default()
             .add_column("c1".into(), Type::Int32, nullable)
@@ -367,7 +367,7 @@ mod test {
         .into_iter()
         .for_each(|(expr, want)| {
             let expr = PhysicalExpr::new(expr, &schema);
-            let have = optimise(expr);
+            let have = simplify(expr);
             assert_eq!(want, have)
         });
     }
