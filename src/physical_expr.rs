@@ -44,44 +44,44 @@ pub enum LogicalOperator {
 pub type Function = for<'a> fn(tuple: &'a Tuple, args: &Vec<PhysicalExpr>) -> Value<'a>;
 
 #[derive(Debug, PartialEq)]
-pub enum PhysicalExpr {
+pub enum PhysicalExpr<'a> {
     Ident(usize),
-    Function(Function, Vec<PhysicalExpr>),
-    Value(Value<'static>), // TODO: in base we will need to tie it to the lifetime of the literal
+    Function(Function, Vec<PhysicalExpr<'a>>),
+    Value(Value<'a>),
     IsNull {
-        expr: Box<PhysicalExpr>,
+        expr: Box<PhysicalExpr<'a>>,
         negated: bool,
     },
     InList {
-        expr: Box<PhysicalExpr>,
-        list: Vec<PhysicalExpr>,
+        expr: Box<PhysicalExpr<'a>>,
+        list: Vec<PhysicalExpr<'a>>,
         negated: bool,
     },
     Between {
-        expr: Box<PhysicalExpr>,
-        low: Box<PhysicalExpr>,
-        high: Box<PhysicalExpr>,
+        expr: Box<PhysicalExpr<'a>>,
+        low: Box<PhysicalExpr<'a>>,
+        high: Box<PhysicalExpr<'a>>,
         negated: bool,
     },
     ArithmeticOp {
-        lhs: Box<PhysicalExpr>,
+        lhs: Box<PhysicalExpr<'a>>,
         op: ArithmeticOperator,
-        rhs: Box<PhysicalExpr>,
+        rhs: Box<PhysicalExpr<'a>>,
     },
     ComparisonOp {
-        lhs: Box<PhysicalExpr>,
+        lhs: Box<PhysicalExpr<'a>>,
         op: ComparisonOperator,
-        rhs: Box<PhysicalExpr>,
+        rhs: Box<PhysicalExpr<'a>>,
     },
     LogicalOp {
-        lhs: Box<PhysicalExpr>,
+        lhs: Box<PhysicalExpr<'a>>,
         op: LogicalOperator,
-        rhs: Box<PhysicalExpr>,
+        rhs: Box<PhysicalExpr<'a>>,
     },
 }
 
-impl PhysicalExpr {
-    pub fn new(expr: Expr, schema: &Schema) -> Self {
+impl<'a> PhysicalExpr<'a> {
+    pub fn new(expr: Expr<'a>, schema: &Schema) -> Self {
         match expr {
             Expr::Ident(ident) => physical_ident(ident, schema),
             Expr::Function(function) => physical_function(function, schema),
@@ -103,7 +103,7 @@ impl PhysicalExpr {
     }
 }
 
-fn physical_ident(ident: ExprIdent, schema: &Schema) -> PhysicalExpr {
+fn physical_ident<'a>(ident: ExprIdent, schema: &Schema) -> PhysicalExpr<'a> {
     let position = match ident {
         ExprIdent::Column(name) => schema.find_column(&name).map(Column::position).unwrap(),
         ExprIdent::QualifiedColumn { table, name } => schema
@@ -115,7 +115,7 @@ fn physical_ident(ident: ExprIdent, schema: &Schema) -> PhysicalExpr {
     PhysicalExpr::Ident(position)
 }
 
-fn physical_function(function: ExprFunction, schema: &Schema) -> PhysicalExpr {
+fn physical_function<'a>(function: ExprFunction<'a>, schema: &Schema) -> PhysicalExpr<'a> {
     let args = function
         .args
         .into_iter()
@@ -128,7 +128,7 @@ fn physical_function(function: ExprFunction, schema: &Schema) -> PhysicalExpr {
     }
 }
 
-fn physical_value(literal: ExprLiteral<'static>) -> PhysicalExpr {
+fn physical_value<'a>(literal: ExprLiteral<'a>) -> PhysicalExpr<'a> {
     // TODO: coerce if required
     let value = match literal {
         ExprLiteral::Number(number) => Value::Int32(number.parse().unwrap()),
@@ -141,12 +141,17 @@ fn physical_value(literal: ExprLiteral<'static>) -> PhysicalExpr {
     PhysicalExpr::Value(value)
 }
 
-fn physical_is_null(expr: Expr, negated: bool, schema: &Schema) -> PhysicalExpr {
+fn physical_is_null<'a>(expr: Expr<'a>, negated: bool, schema: &Schema) -> PhysicalExpr<'a> {
     let expr = Box::new(PhysicalExpr::new(expr, schema));
     PhysicalExpr::IsNull { expr, negated }
 }
 
-fn physical_in_list(expr: Expr, list: Vec<Expr>, negated: bool, schema: &Schema) -> PhysicalExpr {
+fn physical_in_list<'a>(
+    expr: Expr<'a>,
+    list: Vec<Expr<'a>>,
+    negated: bool,
+    schema: &Schema,
+) -> PhysicalExpr<'a> {
     let expr = Box::new(PhysicalExpr::new(expr, schema));
     let list = list
         .into_iter()
@@ -159,13 +164,13 @@ fn physical_in_list(expr: Expr, list: Vec<Expr>, negated: bool, schema: &Schema)
     }
 }
 
-fn physical_between(
-    expr: Expr,
-    high: Expr,
-    low: Expr,
+fn physical_between<'a>(
+    expr: Expr<'a>,
+    high: Expr<'a>,
+    low: Expr<'a>,
     negated: bool,
     schema: &Schema,
-) -> PhysicalExpr {
+) -> PhysicalExpr<'a> {
     let expr = Box::new(PhysicalExpr::new(expr, schema));
     let high = Box::new(PhysicalExpr::new(high, schema));
     let low = Box::new(PhysicalExpr::new(low, schema));
@@ -177,7 +182,12 @@ fn physical_between(
     }
 }
 
-fn physical_binary_op(lhs: Expr, op: ExprOperator, rhs: Expr, schema: &Schema) -> PhysicalExpr {
+fn physical_binary_op<'a>(
+    lhs: Expr<'a>,
+    op: ExprOperator,
+    rhs: Expr<'a>,
+    schema: &Schema,
+) -> PhysicalExpr<'a> {
     let lhs = Box::new(PhysicalExpr::new(lhs, schema));
     let rhs = Box::new(PhysicalExpr::new(rhs, schema));
 

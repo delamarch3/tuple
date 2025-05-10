@@ -31,9 +31,9 @@ pub enum Operator {
     Logical(LogicalOperator),
 }
 
-pub struct Function {
+pub struct Function<'a> {
     pub name: String,
-    pub args: Vec<Expr>,
+    pub args: Vec<Expr<'a>>,
 }
 
 pub enum Ident {
@@ -79,29 +79,29 @@ impl<'a> From<String> for Literal<'a> {
     }
 }
 
-pub enum Expr {
+pub enum Expr<'a> {
     Ident(Ident),
-    Function(Function),
-    Literal(Literal<'static>),
+    Function(Function<'a>),
+    Literal(Literal<'a>),
     IsNull {
-        expr: Box<Expr>,
+        expr: Box<Expr<'a>>,
         negated: bool,
     },
     InList {
-        expr: Box<Expr>,
-        list: Vec<Expr>,
+        expr: Box<Expr<'a>>,
+        list: Vec<Expr<'a>>,
         negated: bool,
     },
     Between {
-        expr: Box<Expr>,
-        low: Box<Expr>,
-        high: Box<Expr>,
+        expr: Box<Expr<'a>>,
+        low: Box<Expr<'a>>,
+        high: Box<Expr<'a>>,
         negated: bool,
     },
     BinaryOp {
-        lhs: Box<Expr>,
+        lhs: Box<Expr<'a>>,
         op: Operator,
-        rhs: Box<Expr>,
+        rhs: Box<Expr<'a>>,
     },
 }
 
@@ -119,11 +119,11 @@ pub fn ident(value: &str) -> Expr {
     }
 }
 
-pub fn lit(value: impl Into<Literal<'static>>) -> Expr {
+pub fn lit<'a>(value: impl Into<Literal<'a>>) -> Expr<'a> {
     Expr::Literal(value.into())
 }
 
-pub fn null() -> Expr {
+pub fn null() -> Expr<'static> {
     Expr::Literal(Literal::Null)
 }
 
@@ -141,7 +141,7 @@ pub fn contains(args: Vec<Expr>) -> Expr {
     })
 }
 
-impl Expr {
+impl<'a> Expr<'a> {
     pub fn is_null(self) -> Self {
         Expr::IsNull {
             expr: Box::new(self),
@@ -156,7 +156,7 @@ impl Expr {
         }
     }
 
-    pub fn in_list(self, list: Vec<Expr>) -> Self {
+    pub fn in_list(self, list: Vec<Expr<'a>>) -> Self {
         Expr::InList {
             expr: Box::new(self),
             list,
@@ -164,7 +164,7 @@ impl Expr {
         }
     }
 
-    pub fn not_in_list(self, list: Vec<Expr>) -> Self {
+    pub fn not_in_list(self, list: Vec<Expr<'a>>) -> Self {
         Expr::InList {
             expr: Box::new(self),
             list,
@@ -172,7 +172,7 @@ impl Expr {
         }
     }
 
-    pub fn between(self, low: impl Into<Expr>, high: impl Into<Expr>) -> Self {
+    pub fn between(self, low: impl Into<Expr<'a>>, high: impl Into<Expr<'a>>) -> Self {
         Expr::Between {
             expr: Box::new(self),
             negated: false,
@@ -181,7 +181,7 @@ impl Expr {
         }
     }
 
-    pub fn not_between(self, low: impl Into<Expr>, high: impl Into<Expr>) -> Self {
+    pub fn not_between(self, low: impl Into<Expr<'a>>, high: impl Into<Expr<'a>>) -> Self {
         Expr::Between {
             expr: Box::new(self),
             negated: true,
@@ -191,7 +191,7 @@ impl Expr {
     }
 
     #[allow(clippy::should_implement_trait)]
-    pub fn add(self, rhs: impl Into<Expr>) -> Self {
+    pub fn add(self, rhs: impl Into<Expr<'a>>) -> Self {
         Expr::BinaryOp {
             lhs: Box::new(self),
             op: Operator::Arithmetic(ArithmeticOperator::Add),
@@ -200,7 +200,7 @@ impl Expr {
     }
 
     #[allow(clippy::should_implement_trait)]
-    pub fn sub(self, rhs: impl Into<Expr>) -> Self {
+    pub fn sub(self, rhs: impl Into<Expr<'a>>) -> Self {
         Expr::BinaryOp {
             lhs: Box::new(self),
             op: Operator::Arithmetic(ArithmeticOperator::Sub),
@@ -209,7 +209,7 @@ impl Expr {
     }
 
     #[allow(clippy::should_implement_trait)]
-    pub fn mul(self, rhs: impl Into<Expr>) -> Self {
+    pub fn mul(self, rhs: impl Into<Expr<'a>>) -> Self {
         Expr::BinaryOp {
             lhs: Box::new(self),
             op: Operator::Arithmetic(ArithmeticOperator::Mul),
@@ -218,7 +218,7 @@ impl Expr {
     }
 
     #[allow(clippy::should_implement_trait)]
-    pub fn div(self, rhs: impl Into<Expr>) -> Self {
+    pub fn div(self, rhs: impl Into<Expr<'a>>) -> Self {
         Expr::BinaryOp {
             lhs: Box::new(self),
             op: Operator::Arithmetic(ArithmeticOperator::Div),
@@ -226,7 +226,7 @@ impl Expr {
         }
     }
 
-    pub fn eq(self, rhs: impl Into<Expr>) -> Self {
+    pub fn eq(self, rhs: impl Into<Expr<'a>>) -> Self {
         Expr::BinaryOp {
             lhs: Box::new(self),
             op: Operator::Comparison(ComparisonOperator::Eq),
@@ -234,7 +234,7 @@ impl Expr {
         }
     }
 
-    pub fn neq(self, rhs: impl Into<Expr>) -> Self {
+    pub fn neq(self, rhs: impl Into<Expr<'a>>) -> Self {
         Expr::BinaryOp {
             lhs: Box::new(self),
             op: Operator::Comparison(ComparisonOperator::Neq),
@@ -242,7 +242,7 @@ impl Expr {
         }
     }
 
-    pub fn lt(self, rhs: impl Into<Expr>) -> Self {
+    pub fn lt(self, rhs: impl Into<Expr<'a>>) -> Self {
         Expr::BinaryOp {
             lhs: Box::new(self),
             op: Operator::Comparison(ComparisonOperator::Lt),
@@ -250,7 +250,7 @@ impl Expr {
         }
     }
 
-    pub fn le(self, rhs: impl Into<Expr>) -> Self {
+    pub fn le(self, rhs: impl Into<Expr<'a>>) -> Self {
         Expr::BinaryOp {
             lhs: Box::new(self),
             op: Operator::Comparison(ComparisonOperator::Le),
@@ -258,7 +258,7 @@ impl Expr {
         }
     }
 
-    pub fn gt(self, rhs: impl Into<Expr>) -> Self {
+    pub fn gt(self, rhs: impl Into<Expr<'a>>) -> Self {
         Expr::BinaryOp {
             lhs: Box::new(self),
             op: Operator::Comparison(ComparisonOperator::Gt),
@@ -266,7 +266,7 @@ impl Expr {
         }
     }
 
-    pub fn ge(self, rhs: impl Into<Expr>) -> Self {
+    pub fn ge(self, rhs: impl Into<Expr<'a>>) -> Self {
         Expr::BinaryOp {
             lhs: Box::new(self),
             op: Operator::Comparison(ComparisonOperator::Ge),
@@ -274,7 +274,7 @@ impl Expr {
         }
     }
 
-    pub fn and(self, rhs: impl Into<Expr>) -> Self {
+    pub fn and(self, rhs: impl Into<Expr<'a>>) -> Self {
         Expr::BinaryOp {
             lhs: Box::new(self),
             op: Operator::Logical(LogicalOperator::And),
@@ -282,7 +282,7 @@ impl Expr {
         }
     }
 
-    pub fn or(self, rhs: impl Into<Expr>) -> Self {
+    pub fn or(self, rhs: impl Into<Expr<'a>>) -> Self {
         Expr::BinaryOp {
             lhs: Box::new(self),
             op: Operator::Logical(LogicalOperator::Or),

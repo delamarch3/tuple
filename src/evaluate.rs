@@ -5,7 +5,10 @@ use crate::tuple::Tuple;
 use crate::value::Value;
 
 #[inline(always)]
-pub fn evaluate<'a>(tuple: &'a Tuple, expr: &Expr) -> Value<'a> {
+pub fn evaluate<'a, 'e>(tuple: &'a Tuple, expr: &Expr<'e>) -> Value<'a>
+where
+    'e: 'a,
+{
     match expr {
         Expr::Ident(position) => tuple.get(*position),
         Expr::Function(evaluate_function, args) => evaluate_function(tuple, args),
@@ -101,12 +104,15 @@ fn evaluate_between<'a>(
 }
 
 #[inline(always)]
-fn evaluate_arithmetic_binary_op<'a>(
+fn evaluate_arithmetic_binary_op<'a, 'e>(
     tuple: &'a Tuple,
-    lhs: &Expr,
+    lhs: &Expr<'e>,
     op: ArithmeticOperator,
-    rhs: &Expr,
-) -> Value<'a> {
+    rhs: &Expr<'e>,
+) -> Value<'a>
+where
+    'e: 'a,
+{
     let lhs = evaluate(tuple, lhs);
     let rhs = evaluate(tuple, rhs);
 

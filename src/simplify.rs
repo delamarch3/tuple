@@ -227,7 +227,7 @@ fn simplify_logical(expr: PhysicalExpr) -> PhysicalExpr {
         return expr;
     };
 
-    fn simplify_and(lhs: PhysicalExpr, rhs: PhysicalExpr) -> PhysicalExpr {
+    fn simplify_and<'a>(lhs: PhysicalExpr<'a>, rhs: PhysicalExpr<'a>) -> PhysicalExpr<'a> {
         match (lhs, rhs) {
             (expr, PhysicalExpr::Value(rhs)) if !rhs.is_zero() => expr,
             (PhysicalExpr::Value(lhs), expr) if !lhs.is_zero() => expr,
@@ -242,7 +242,7 @@ fn simplify_logical(expr: PhysicalExpr) -> PhysicalExpr {
         }
     }
 
-    fn simplify_or(lhs: PhysicalExpr, rhs: PhysicalExpr) -> PhysicalExpr {
+    fn simplify_or<'a>(lhs: PhysicalExpr<'a>, rhs: PhysicalExpr<'a>) -> PhysicalExpr<'a> {
         match (lhs, rhs) {
             (_, PhysicalExpr::Value(rhs)) if !rhs.is_zero() => PhysicalExpr::Value(Value::Int8(1)),
             (PhysicalExpr::Value(lhs), _) if !lhs.is_zero() => PhysicalExpr::Value(Value::Int8(1)),
